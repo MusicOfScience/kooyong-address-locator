@@ -23,14 +23,15 @@ address_input = st.text_input("Enter an address in Victoria:")
 
 @st.cache_data(show_spinner=False)
 def load_kooyong_boundary():
-    zip_path = "Data/Vic-october-2024-esri.zip"
-    extract_dir = "extracted_shapefiles"
+    # Dynamically find the script folder and build full path to ZIP
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    zip_path = os.path.join(base_dir, "Data", "Vic-october-2024-esri.zip")
+    extract_dir = os.path.join(base_dir, "extracted_shapefiles")
 
-    # Ensure directory exists
     if not os.path.exists(extract_dir):
         os.makedirs(extract_dir)
 
-    # Extract ZIP (only once)
+    # Extract ZIP
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_dir)
 
@@ -47,6 +48,11 @@ def load_kooyong_boundary():
         return None
 
     gdf = gpd.read_file(shp_file)
+
+    if "Elect_div" not in gdf.columns:
+        st.error("❌ 'Elect_div' column not found in shapefile.")
+        return None
+
     kooyong = gdf[gdf["Elect_div"] == "Kooyong"]
     return kooyong
 
