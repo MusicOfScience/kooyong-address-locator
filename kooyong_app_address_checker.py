@@ -2,76 +2,57 @@
 
 import streamlit as st
 import geopandas as gpd
-import osmnx as ox
-import contextily as ctx
+import zipfile, os
 import matplotlib.pyplot as plt
 from shapely.geometry import Point
 from geopy.geocoders import Nominatim
-from io import BytesIO
 
-# --- SETUP ---
-st.set_page_config(page_title="Kooyong 2025 Map", layout="wide")
-st.title("🗺️ Kooyong 2025 Map with Address Checker")
-st.caption("Check if an address is inside Kooyong and generate a stylised map.")
+st.set_page_config(page_title="Kooyong Boundary Checker", layout="wide")
 
-# --- LOAD BOUNDARY ---
-@st.cache_data
+@st.cache_data(show_spinner="Loading Kooyong boundaries…")
 def load_kooyong_boundary():
-    url = "https://github.com/MusicOfScience/kooyong-maps/raw/main/FED__2024_Electoral_Divisions.shp.zip"
-    gdf = gpd.read_file(f"zip://{url}!")
-    kooyong = gdf[gdf["Elect_div"].str.contains("Kooyong", case=False)]
-    return kooyong.to_crs(epsg=3857)
+    local_zip = "data/Vic-october-2024-esri.zip"
+    extract_dir = "/tmp/aec_data"
 
-kooyong = load_kooyong_boundary()
+    if not os.path.exists(extract_dir):
+        with zipfile.ZipFile(local_zip, "r") as zip_ref:
+            zip_ref.extractall(extract_dir)
 
-# --- SIDEBAR ---
-st.sidebar.header("📮 Address Lookup")
-address = st.sidebar.text_input("Enter an address", value="25 Smith St, Hawthorn VIC")
-style = st.sidebar.selectbox("🗺️ Basemap style", [
-    "OpenStreetMap.Mapnik",
-    "CartoDB.Positron",
-    "CartoDB.DarkMatter",
-    "Stamen.TonerLite",
-])
+    shp_file = [f for f in os.listdir(extract_dir) if f.endswith(".shp")][0]
+    full_path = os.path.join(extract_dir, shp_file)
 
-# --- GEOCODING ---
-geolocator = Nominatim(user_agent="kooyong_checker")
-location = geolocator.geocode(address)
-gpoint = None
+    gdf = gpd.read_file(full_path)
+    return gdf[gdf["Elect_div"].str.contains("Kooyong", case=False)].to_crs(epsg=3857)
 
-if location:
-    lon, lat = location.longitude, location.latitude
-    point = Point(lon, lat)
-    gpoint = gpd.GeoDataFrame(geometry=[point], crs="EPSG:4326").to_crs(epsg=3857)
-    inside = kooyong.contains(gpoint.geometry.iloc[0]).bool()
-    result_msg = "✅ Inside Kooyong" if inside else "❌ Outside Kooyong"
-else:
-    result_msg = "❌ Could not geocode address"
+def geocode_address(address):
+    geolocator = Nominatim(user_agent="kooyong-checker")
+    try:
+        location = geolocator.geocode(address)
+        if location:
+            return Point(location.longitude, location.latitude)
+    except:
+        return None
+    return None
 
-# --- DISPLAY RESULT ---
-st.subheader("📍 Address Check Result")
-st.markdown(f"**{address}** → {result_msg}")
+st.title("📮 Kooyong 2025 Boundary Checker")
 
-# --- PLOT MAP ---
-fig, ax = plt.subplots(figsize=(12, 8))
-ctx.add_basemap(ax, source=eval(f"ctx.providers.{style}"))
-kooyong.boundary.plot(ax=ax, edgecolor="#00e0d6", linewidth=2)
+address = st.text_input("Enter an address (e.g. '385 Toorak Rd, South Yarra')")
 
-if gpoint is not None:
-    gpoint.plot(ax=ax, color="red", markersize=100)
-    ax.text(
-        gpoint.geometry.x.iloc[0],
-        gpoint.geometry.y.iloc[0] + 100,
-        "📍 Your Address",
-        fontsize=10,
-        ha="center",
-        color="red"
-    )
+gdf = load_kooyong_boundary()
 
-ax.axis('off')
-st.pyplot(fig)
+if address:
+    point = geocode_address(address)
+    if point:
+        projected_point = gpd.GeoSeries([point], crs="EPSG:4326").to_crs(gdf.crs)
+        inside = gdf.contains(projected_point.iloc[0]).any()
+        status = "✅ Inside Kooyong" if inside else "❌ Outside Kooyong"
+        st.subheader(status)
 
-# --- DOWNLOAD ---
-buf = BytesIO()
-fig.savefig(buf, format="png", dpi=300, bbox_inches="tight")
-st.download_button("📥 Download map as PNG", data=buf.getvalue(), file_name="kooyong_map.png", mime="image/png")
+        fig, ax = plt.subplots(figsize=(10, 10))
+        gdf.plot(ax=ax, color="white", edgecolor="black")
+        projected_point.plot(ax=ax, color="red", markersize=50)
+        ax.set_title("Kooyong Boundary with Address Point")
+        st.pyplot(fig)
+    else:
+        st.error("Address could not be geocoded.")
+
