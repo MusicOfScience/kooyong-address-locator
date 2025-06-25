@@ -2,6 +2,8 @@ streamlit
 geopandas
 osmnx
 contextily
-geopy
 matplotlib
+shapely
+pyogrio
+geopy
 pillow
