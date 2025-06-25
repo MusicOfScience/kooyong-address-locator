@@ -1,7 +1,4 @@
-streamlit
-geopandas
-pandas
-folium
-streamlit-folium
-geopy
+gdal-bin
+libgdal-dev
+libspatialindex-dev
 
