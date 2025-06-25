@@ -4,66 +4,68 @@ import streamlit as st
 import geopandas as gpd
 import folium
 from streamlit_folium import st_folium
-from shapely.geometry import Point
-from geopy.geocoders import Nominatim
 import zipfile
 import os
 
-st.set_page_config(page_title="Kooyong Electorate Address Checker", layout="wide")
-
-# Paths
+# --- CONFIG ---
 ZIP_PATH = "data/Vic-october-2024-esri.zip"
-EXTRACT_DIR = "data/aec_boundary"
+EXTRACT_DIR = "extracted_shapefiles"
 
+# --- LOAD BOUNDARY ---
 @st.cache_data
 def load_kooyong_boundary():
-    # Check and extract shapefiles
     if not os.path.exists(EXTRACT_DIR):
         os.makedirs(EXTRACT_DIR, exist_ok=True)
         with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
             zip_ref.extractall(EXTRACT_DIR)
 
-    # Find the .shp file
     shp_files = [f for f in os.listdir(EXTRACT_DIR) if f.endswith(".shp")]
     if not shp_files:
+        st.error(f"❌ No .shp files found in {EXTRACT_DIR}. Contents: {os.listdir(EXTRACT_DIR)}")
         return None
 
-    # Load and filter for Kooyong
     gdf = gpd.read_file(os.path.join(EXTRACT_DIR, shp_files[0]))
     return gdf[gdf["Elect_div"].str.contains("Kooyong", case=False)]
 
-@st.cache_data
+# --- GEOCODE ---
+from geopy.geocoders import Nominatim
+geolocator = Nominatim(user_agent="kooyong_checker")
+
 def geocode_address(address):
-    geolocator = Nominatim(user_agent="kooyong_locator")
-    location = geolocator.geocode(address)
-    return (location.latitude, location.longitude) if location else (None, None)
+    try:
+        location = geolocator.geocode(address + ", Victoria, Australia", timeout=10)
+        if location:
+            return location.latitude, location.longitude
+    except Exception:
+        pass
+    return None, None
 
-st.title("📍 Kooyong Electorate Address Checker")
+# --- APP ---
+st.set_page_config(layout="wide", page_title="Kooyong Boundary Checker 🗺️")
+st.title("🗳️ Kooyong Electorate Boundary Checker")
 
-address = st.text_input("Enter a Victorian address to check if it’s inside the Kooyong federal electorate:")
+address = st.text_input("📮 Enter an address in Victoria:", "123 High St, Kew")
+lat, lon = geocode_address(address)
 
-if address:
-    lat, lon = geocode_address(address)
-    if lat is None or lon is None:
-        st.error("❌ Could not locate that address. Try a more specific or complete version.")
+gdf = load_kooyong_boundary()
+if gdf is None:
+    st.stop()
+
+if lat is not None and lon is not None:
+    point = gpd.points_from_xy([lon], [lat], crs="EPSG:4326")
+    within = gdf.to_crs("EPSG:4326").contains(point[0])
+
+    # ✅ Show ONLY the message — suppress all extra object details
+    if within:
+        st.success("✅ Inside Kooyong")
     else:
-        kooyong = load_kooyong_boundary()
-        if kooyong is None:
-            st.error("❌ Could not load Kooyong shapefile. Ensure the ZIP is uploaded correctly.")
-        else:
-            point = Point(lon, lat)
-            within = kooyong.contains(point).any()
+        st.warning("🚫 Outside Kooyong")
 
-            if within:
-                st.success("✅ This address is inside the Kooyong electorate.")
-            else:
-                st.warning("🚫 This address is outside the Kooyong electorate.")
+    # --- DRAW MAP ---
+    m = folium.Map(location=[lat, lon], zoom_start=14, control_scale=True)
+    folium.Marker(location=[lat, lon], popup="Entered Address", icon=folium.Icon(color="red")).add_to(m)
+    folium.GeoJson(gdf).add_to(m)
+    st_folium(m, width=900, height=600)
 
-            # 🌐 Show map
-            m = folium.Map(location=[lat, lon], zoom_start=14, tiles="CartoDB Positron")
-            folium.Marker([lat, lon], tooltip="📍 Your address").add_to(m)
-            folium.GeoJson(kooyong.geometry, name="Kooyong Boundary").add_to(m)
-            st_folium(m, width=800, height=500)
-
-
-
+else:
+    st.error("Could not geocode the address. Try again with more detail.")
