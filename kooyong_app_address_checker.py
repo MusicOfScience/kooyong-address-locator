@@ -23,10 +23,8 @@ address_input = st.text_input("Enter an address in Victoria:")
 
 @st.cache_data(show_spinner=False)
 def load_kooyong_boundary():
-    # Dynamically find the script folder and build full path to ZIP
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    zip_path = os.path.join(base_dir, "Data", "Vic-october-2024-esri.zip")
-    extract_dir = os.path.join(base_dir, "extracted_shapefiles")
+    zip_path = "Vic-october-2024-esri.zip"  # 🧠 Removed the 'Data/' folder assumption
+    extract_dir = "extracted_shapefiles"
 
     if not os.path.exists(extract_dir):
         os.makedirs(extract_dir)
