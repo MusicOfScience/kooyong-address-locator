@@ -1,85 +1,97 @@
 # 📍 Kooyong Address Checker & Map (Streamlit App)
 
 import streamlit as st
-import zipfile
-import os
 import geopandas as gpd
 import folium
-from streamlit_folium import st_folium
+from streamlit_folium import folium_static
 from shapely.geometry import Point
 from geopy.geocoders import Nominatim
-import tempfile
+from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
+import zipfile
+import os
+import time
 
 st.set_page_config(page_title="Kooyong Address Checker", layout="wide")
 
-# 🎨 Custom theme
-st.markdown("""
-    <style>
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-        }
-        .css-1d391kg {padding: 2rem 1rem 10rem;}
-    </style>
-""", unsafe_allow_html=True)
+st.title("📍 Kooyong Electorate Address Checker")
 
-st.title("📍 Kooyong Electorate Address Checker (2025)")
+# 🎯 Load Kooyong shapefile from ZIP in ./Data
+@st.cache_data
+def load_kooyong_boundary():
+    zip_path = "Data/Vic-october-2024-esri.zip"
+    extract_dir = "extracted_shapefiles"
 
-@st.cache_data(show_spinner=False)
-def extract_and_load_shapefile():
-    shapefile_dir = "Data/Vic-october-2024-esri"
-    if not os.path.exists(shapefile_dir):
-        raise FileNotFoundError("❌ Kooyong shapefile directory not found.")
-    shp_files = [f for f in os.listdir(shapefile_dir) if f.endswith(".shp")]
-    if not shp_files:
-        raise FileNotFoundError(f"❌ No .shp files found in {shapefile_dir}. Contents: {os.listdir(shapefile_dir)}")
-    shp_path = os.path.join(shapefile_dir, shp_files[0])
-    gdf = gpd.read_file(shp_path)
-    return gdf
+    if not os.path.exists(extract_dir):
+        os.makedirs(extract_dir)
 
-@st.cache_data(show_spinner=False)
-def get_geolocator():
-    return Nominatim(user_agent="kooyong-checker")
+    with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        zip_ref.extractall(extract_dir)
 
-# 🔽 Style selector
-style = st.selectbox("Choose a map style:", ["OpenStreetMap", "Stamen Toner", "CartoDB Positron"], index=0)
+    shapefiles = []
+    for root, _, files in os.walk(extract_dir):
+        for file in files:
+            if file.endswith(".shp"):
+                shapefiles.append(os.path.join(root, file))
 
-# 📬 Address input
-address_input = st.text_input("Enter an address in Victoria:", "123 High St, Kew")
+    if not shapefiles:
+        raise FileNotFoundError(f"❌ No .shp files found in {extract_dir}. Contents: {os.listdir(extract_dir)}")
 
+    gdf = gpd.read_file(shapefiles[0])
+    return gdf.to_crs(epsg=4326)
+
+# 🧭 Load map styles
+map_styles = {
+    "OpenStreetMap": "OpenStreetMap",
+    "CartoDB Positron": "CartoDB Positron",
+    "Stamen Toner Lite": "Stamen TonerLite",
+}
+
+# 📮 User input
+address_input = st.text_input("Enter an address in Victoria:")
+
+style = st.selectbox("Choose a map style:", list(map_styles.keys()))
+
+# 📦 Load boundary
+try:
+    kooyong = load_kooyong_boundary()
+except Exception as e:
+    st.error("❌ Could not load Kooyong shapefile. Ensure the ZIP is uploaded correctly.")
+    st.stop()
+
+# 📌 Geocode
 if address_input:
-    geolocator = get_geolocator()
+    geolocator = Nominatim(user_agent="kooyong-checker")
     try:
-        location = geolocator.geocode(address_input, country_codes="au", exactly_one=True, timeout=10)
+        location = geolocator.geocode(address_input, timeout=10)
+        time.sleep(1.5)  # avoid over-querying
+    except (GeocoderTimedOut, GeocoderUnavailable):
+        st.error("🌐 Geocoder is unavailable. Please wait or try again.")
+        st.stop()
     except Exception as e:
-        st.error("🌐 Geocoding service is temporarily unavailable. Please try again later.")
+        st.error(f"❌ Unexpected error: {e}")
         st.stop()
 
     if not location:
-        st.warning("⚠️ Could not geocode that address. Please try a more specific or local address.")
+        st.warning("❓ Address not found. Check for typos or try a full address.")
         st.stop()
 
     point = Point(location.longitude, location.latitude)
-    try:
-        gdf = extract_and_load_shapefile()
-    except Exception as e:
-        st.error("❌ Could not load Kooyong shapefile. Ensure the ZIP is uploaded correctly.")
-        st.stop()
+    within = kooyong.contains(point).any()
 
-    within = gdf.contains(point).any()
-
+    # ✅ Inside/outside message only
     if within:
-        st.success("✅ Inside Kooyong")
+        st.success("✅ This address is within Kooyong.")
     else:
-        st.warning("🚫 Outside Kooyong")
+        st.warning("🚫 This address is outside Kooyong.")
 
-    # 🗺️ Map drawing
-    m = folium.Map(location=[location.latitude, location.longitude], zoom_start=14, tiles=style)
-    folium.Marker([location.latitude, location.longitude], popup="Your address").add_to(m)
-    folium.GeoJson(gdf.geometry, name="Kooyong Boundary", style_function=lambda x: {
-        'fillColor': '#00B4B6', 'color': '#005566', 'weight': 2, 'fillOpacity': 0.2
-    }).add_to(m)
+    # 🗺️ Map
+    m = folium.Map(location=[location.latitude, location.longitude], zoom_start=14, tiles=map_styles[style])
 
-    st_folium(m, width=1000, height=600)
+    folium.GeoJson(kooyong.geometry, name="Kooyong Boundary").add_to(m)
+    folium.Marker(
+        [location.latitude, location.longitude],
+        popup=f"You entered: {address_input}",
+        icon=folium.Icon(color="blue" if within else "red", icon="map-marker")
+    ).add_to(m)
 
-
+    folium_static(m)
