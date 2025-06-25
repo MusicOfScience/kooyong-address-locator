@@ -1,10 +1,6 @@
 streamlit
 geopandas
+pandas
 folium
-osmnx
-contextily
-matplotlib
-shapely
-pyogrio
+streamlit-folium
 geopy
-pillow
