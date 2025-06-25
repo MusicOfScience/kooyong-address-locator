@@ -9,55 +9,61 @@ from geopy.geocoders import Nominatim
 import zipfile
 import os
 
-st.set_page_config(page_title="Kooyong Electorate Checker", layout="wide")
+st.set_page_config(page_title="Kooyong Electorate Address Checker", layout="wide")
+
+# Paths
+ZIP_PATH = "data/Vic-october-2024-esri.zip"
+EXTRACT_DIR = "data/aec_boundary"
 
 @st.cache_data
 def load_kooyong_boundary():
-    extract_dir = "data/aec_boundary"
-    zip_path = "data/Vic-october-2024-esri.zip"
+    # Check and extract shapefiles
+    if not os.path.exists(EXTRACT_DIR):
+        os.makedirs(EXTRACT_DIR, exist_ok=True)
+        with zipfile.ZipFile(ZIP_PATH, "r") as zip_ref:
+            zip_ref.extractall(EXTRACT_DIR)
 
-    if not os.path.exists(extract_dir):
-        os.makedirs(extract_dir, exist_ok=True)
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(extract_dir)
+    # Find the .shp file
+    shp_files = [f for f in os.listdir(EXTRACT_DIR) if f.endswith(".shp")]
+    if not shp_files:
+        return None
 
-    shp_file = [f for f in os.listdir(extract_dir) if f.endswith(".shp")][0]
-    gdf = gpd.read_file(os.path.join(extract_dir, shp_file))
+    # Load and filter for Kooyong
+    gdf = gpd.read_file(os.path.join(EXTRACT_DIR, shp_files[0]))
     return gdf[gdf["Elect_div"].str.contains("Kooyong", case=False)]
 
 @st.cache_data
 def geocode_address(address):
     geolocator = Nominatim(user_agent="kooyong_locator")
     location = geolocator.geocode(address)
-    return location.latitude, location.longitude if location else (None, None)
+    return (location.latitude, location.longitude) if location else (None, None)
 
 st.title("📍 Kooyong Electorate Address Checker")
 
-address = st.text_input("Enter an address to check if it's in the Kooyong federal electorate:")
+address = st.text_input("Enter a Victorian address to check if it’s inside the Kooyong federal electorate:")
 
 if address:
-    try:
-        lat, lon = geocode_address(address)
-        if lat is None or lon is None:
-            st.error("Could not geocode the address. Please try a more complete or accurate version.")
+    lat, lon = geocode_address(address)
+    if lat is None or lon is None:
+        st.error("❌ Could not locate that address. Try a more specific or complete version.")
+    else:
+        kooyong = load_kooyong_boundary()
+        if kooyong is None:
+            st.error("❌ Could not load Kooyong shapefile. Ensure the ZIP is uploaded correctly.")
         else:
-            user_point = Point(lon, lat)
-            kooyong = load_kooyong_boundary()
-            within = kooyong.contains(user_point).any()
+            point = Point(lon, lat)
+            within = kooyong.contains(point).any()
 
-            # ✅ FIXED: This block avoids the spooled object dump
             if within:
-                st.success("✅ Inside Kooyong")
+                st.success("✅ This address is inside the Kooyong electorate.")
             else:
-                st.warning("🚫 Outside Kooyong")
+                st.warning("🚫 This address is outside the Kooyong electorate.")
 
-            # Map rendering
-            m = folium.Map(location=[lat, lon], zoom_start=14)
-            folium.Marker([lat, lon], tooltip="Your address").add_to(m)
-            folium.GeoJson(kooyong.geometry).add_to(m)
+            # 🌐 Show map
+            m = folium.Map(location=[lat, lon], zoom_start=14, tiles="CartoDB Positron")
+            folium.Marker([lat, lon], tooltip="📍 Your address").add_to(m)
+            folium.GeoJson(kooyong.geometry, name="Kooyong Boundary").add_to(m)
             st_folium(m, width=800, height=500)
 
-    except Exception as e:
-        st.error(f"An error occurred: {e}")
 
 
