@@ -1,0 +1,7 @@
+streamlit
+geopandas
+osmnx
+contextily
+geopy
+matplotlib
+pillow
