@@ -1,4 +1,4 @@
-# 📍 Kooyong Address Checker & Map (Streamlit App)
+# 📍 Kooyong Electorate Address Checker – Clean Version
 
 import streamlit as st
 import geopandas as gpd
@@ -56,25 +56,33 @@ def load_kooyong_boundary():
     kooyong = gdf[gdf["Elect_div"] == "Kooyong"]
     return kooyong
 
-# 🧭 GEOCODING SETUP
+# 🧭 GEOCODING WITH CACHE AND USER AGENT
 @lru_cache(maxsize=100)
 def safe_geocode(query):
-    time.sleep(1)  # avoid hammering Nominatim
+    time.sleep(1)  # Respect Nominatim rate limit
     geolocator = Nominatim(user_agent="kooyong_locator_app (https://github.com/MusicOfScience/kooyong-address-locator)")
     return geolocator.geocode(query, country_codes="au", addressdetails=True)
 
 kooyong = load_kooyong_boundary()
 
 if kooyong is not None and address_input.strip():
+    query = address_input
+    if "Victoria" not in query and "VIC" not in query:
+        query += ", Victoria, Australia"
+
     try:
-        location = safe_geocode(address_input)
+        location = safe_geocode(query)
     except GeocoderUnavailable:
         st.error("⚠️ Geocoding service temporarily unavailable. This may be due to rate-limiting. Please wait a few seconds and try again.")
         location = None
 
     if location and location.raw.get("address", {}).get("state") == "Victoria":
         point = Point(location.longitude, location.latitude)
-        within = kooyong.geometry.iloc[0].contains(point)
+        within = kooyong.geometry.iloc[0].intersects(point)
+
+        # 🧭 Display raw geocode info for debugging
+        st.write("📍 Geocoded to:", (location.latitude, location.longitude))
+        st.write("📎 Location:", location.raw.get("display_name"))
 
         if within:
             st.success("✅ This address is inside Kooyong.")
@@ -83,10 +91,14 @@ if kooyong is not None and address_input.strip():
 
         # 🗺️ FOLIUM MAP
         m = folium.Map(location=[location.latitude, location.longitude], zoom_start=14, tiles=style)
-        folium.Marker([location.latitude, location.longitude], tooltip="Your address", icon=folium.Icon(color='blue')).add_to(m)
+        folium.Marker(
+            [location.latitude, location.longitude],
+            tooltip="Your address",
+            icon=folium.Icon(color='blue')
+        ).add_to(m)
         folium.GeoJson(kooyong.geometry.iloc[0], name="Kooyong Boundary").add_to(m)
-
         st_folium(m, width=1000, height=600)
     else:
-        st.warning("⚠️ Address not found in Victoria, Australia.")
+        st.warning("⚠️ Address not found in Victoria, Australia. Try adding suburb or postcode.")
+
 
