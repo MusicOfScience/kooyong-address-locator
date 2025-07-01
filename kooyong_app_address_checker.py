@@ -10,17 +10,17 @@ from geopy.exc import GeocoderUnavailable
 import zipfile
 import os
 import time
+import json
+from datetime import datetime
 from functools import lru_cache
 
 st.set_page_config(page_title="Kooyong Electorate Checker", layout="wide")
 st.title("📍 Kooyong Electorate Address Checker")
 
-# 🎨 MAP STYLE SELECTOR
 style = st.selectbox("Choose a map style:", [
     "OpenStreetMap", "Stamen Toner", "Stamen Terrain", "CartoDB Positron", "CartoDB Dark_Matter"
 ])
 
-# 📮 ADDRESS INPUT
 address_input = st.text_input("Enter an address in Victoria:")
 
 @st.cache_data(show_spinner=False)
@@ -31,8 +31,12 @@ def load_kooyong_boundary():
     if not os.path.exists(extract_dir):
         os.makedirs(extract_dir)
 
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extract_dir)
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_dir)
+    except Exception as e:
+        st.error("❌ Failed to extract shapefile.")
+        return None
 
     shp_file = None
     for root, dirs, files in os.walk(extract_dir):
@@ -46,68 +50,91 @@ def load_kooyong_boundary():
         return None
 
     gdf = gpd.read_file(shp_file)
-
     if "Elect_div" not in gdf.columns:
         st.error("❌ 'Elect_div' column not found in shapefile.")
         return None
 
     return gdf[gdf["Elect_div"] == "Kooyong"]
 
-# 🧠 Dynamically compute Kooyong bounding box from shapefile
 def get_kooyong_viewbox(gdf):
-    bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
-    sw = (bounds[0], bounds[1])  # (min_lon, min_lat)
-    ne = (bounds[2], bounds[3])  # (max_lon, max_lat)
-    return [sw, ne]
+    try:
+        bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
+        return [bounds[0], bounds[1], bounds[2], bounds[3]]  # [lon1, lat1, lon2, lat2]
+    except Exception as e:
+        st.warning("⚠️ Could not compute bounding box.")
+        return None
 
-# Load boundary once
-kooyong = load_kooyong_boundary()
+def log_geocode_result(input_address, location, within, error=None):
+    log_entry = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "input": input_address,
+        "lat": location.latitude if location else None,
+        "lon": location.longitude if location else None,
+        "matched_suburb": location.raw.get("address", {}).get("suburb", "Unknown") if location else None,
+        "in_kooyong": within,
+        "error": error
+    }
+    try:
+        with open("geocode_log.json", "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+    except:
+        pass  # Fail silently for logging errors
 
-# Safe geocode with bounding box from AEC shapefile
 @lru_cache(maxsize=100)
 def safe_geocode(query, viewbox):
-    time.sleep(1)  # throttle
-    geolocator = Nominatim(user_agent="kooyong_locator_app (https://github.com/MusicOfScience/kooyong-address-locator)")
-    return geolocator.geocode(
-        query,
-        country_codes="au",
-        addressdetails=True,
-        viewbox=viewbox,
-        bounded=True
-    )
+    try:
+        time.sleep(1)
+        geolocator = Nominatim(user_agent="kooyong_locator_app (https://github.com/MusicOfScience/kooyong-address-locator)")
+        return geolocator.geocode(
+            query,
+            country_codes="au",
+            addressdetails=True,
+            viewbox=viewbox,
+            bounded=True
+        )
+    except Exception:
+        return None
 
-# 🧭 Geocode and check
+kooyong = load_kooyong_boundary()
+
 if kooyong is not None and address_input.strip():
     viewbox = get_kooyong_viewbox(kooyong)
 
-    try:
-        location = safe_geocode(address_input, tuple(viewbox))
-    except GeocoderUnavailable:
-        st.error("⚠️ Geocoding temporarily unavailable. Please wait and try again.")
+    if viewbox:
         location = None
+        try:
+            location = safe_geocode(address_input, viewbox)
+        except GeocoderUnavailable:
+            st.error("⚠️ Geocoding temporarily unavailable.")
+        except Exception as e:
+            st.error("⚠️ Error during geocoding.")
+            log_geocode_result(address_input, None, False, error=str(e))
 
-    if location and location.raw.get("address", {}).get("state") == "Victoria":
-        point = Point(location.longitude, location.latitude)
-        within = kooyong.geometry.iloc[0].intersects(point)
+        if location and location.raw.get("address", {}).get("state") == "Victoria":
+            point = Point(location.longitude, location.latitude)
+            within = kooyong.geometry.iloc[0].intersects(point)
 
-        # 📎 Debugging feedback
-        st.write("📍 Geocoded to:", (location.latitude, location.longitude))
-        st.write("📎 Full address:", location.raw.get("display_name"))
-        st.write("🏘️ Suburb:", location.raw.get("address", {}).get("suburb", "Unknown"))
+            st.write("📍 Geocoded to:", (location.latitude, location.longitude))
+            st.write("📎 Full address:", location.raw.get("display_name"))
+            st.write("🏘️ Suburb:", location.raw.get("address", {}).get("suburb", "Unknown"))
 
-        if within:
-            st.success("✅ This address is inside Kooyong.")
+            if within:
+                st.success("✅ This address is inside Kooyong.")
+            else:
+                st.warning("🚫 This address is outside Kooyong.")
+
+            log_geocode_result(address_input, location, within)
+
+            m = folium.Map(location=[location.latitude, location.longitude], zoom_start=14, tiles=style)
+            folium.Marker(
+                [location.latitude, location.longitude],
+                tooltip="Your address",
+                icon=folium.Icon(color='blue')
+            ).add_to(m)
+            folium.GeoJson(kooyong.geometry.iloc[0], name="Kooyong Boundary").add_to(m)
+            st_folium(m, width=1000, height=600)
         else:
-            st.warning("🚫 This address is outside Kooyong.")
-
-        # 🗺️ Map output
-        m = folium.Map(location=[location.latitude, location.longitude], zoom_start=14, tiles=style)
-        folium.Marker(
-            [location.latitude, location.longitude],
-            tooltip="Your address",
-            icon=folium.Icon(color='blue')
-        ).add_to(m)
-        folium.GeoJson(kooyong.geometry.iloc[0], name="Kooyong Boundary").add_to(m)
-        st_folium(m, width=1000, height=600)
+            st.warning("⚠️ Address not found in Victoria, Australia.")
+            log_geocode_result(address_input, None, False, error="Not found or outside Victoria")
     else:
-        st.warning("⚠️ Address not found in Victoria, Australia. Please check spelling or add suburb/postcode.")
+        st.error("❌ Could not calculate Kooyong bounding box. Check shapefile.")
