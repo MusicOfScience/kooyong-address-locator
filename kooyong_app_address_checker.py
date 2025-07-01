@@ -43,8 +43,9 @@ def load_street_csv():
 df = load_street_csv()
 
 # 🌐 Get real street geometries from OSM
-@st.cache_data(show_spinner=True)
-def get_osm_street_geometries(kooyong_polygon):  # pass only the raw Polygon
+
+# 🛑 Do NOT cache this function — polygon input is unhashable
+def get_osm_street_geometries(kooyong_polygon):
     ox.settings.log_console = False
     ox.settings.use_cache = True
     tags = {"highway": True}
