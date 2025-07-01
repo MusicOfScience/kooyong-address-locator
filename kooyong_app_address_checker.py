@@ -44,15 +44,18 @@ df = load_street_csv()
 
 # 🌐 Get real street geometries from OSM
 @st.cache_data(show_spinner=True)
-def get_osm_street_geometries(kooyong_poly):
+def get_osm_street_geometries(kooyong_polygon):  # pass only the raw Polygon
     ox.settings.log_console = False
     ox.settings.use_cache = True
     tags = {"highway": True}
-    osm_gdf = ox.geometries_from_polygon(kooyong_poly.geometry.iloc[0], tags)
+    osm_gdf = ox.geometries_from_polygon(kooyong_polygon, tags)
     osm_gdf = osm_gdf[~osm_gdf["name"].isna()]
     return osm_gdf[["name", "geometry"]].reset_index(drop=True)
 
-osm_streets = get_osm_street_geometries(kooyong_gdf)
+# Call it with just the polygon (not full GeoDataFrame)
+kooyong_poly_geom = kooyong_gdf.geometry.iloc[0]
+osm_streets = get_osm_street_geometries(kooyong_poly_geom)
+
 
 # 🎯 Join street name lookups with OSM geometries
 def merge_lookup_with_osm(df_lookup, gdf_osm):
