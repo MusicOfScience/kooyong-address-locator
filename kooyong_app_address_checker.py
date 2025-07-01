@@ -9,6 +9,8 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderUnavailable
 import zipfile
 import os
+import time
+from functools import lru_cache
 
 st.set_page_config(page_title="Kooyong Electorate Checker", layout="wide")
 st.title("📍 Kooyong Electorate Address Checker")
@@ -54,20 +56,20 @@ def load_kooyong_boundary():
     kooyong = gdf[gdf["Elect_div"] == "Kooyong"]
     return kooyong
 
+# 🧭 GEOCODING SETUP
+@lru_cache(maxsize=100)
+def safe_geocode(query):
+    time.sleep(1)  # avoid hammering Nominatim
+    geolocator = Nominatim(user_agent="kooyong_locator_app (https://github.com/MusicOfScience/kooyong-address-locator)")
+    return geolocator.geocode(query, country_codes="au", addressdetails=True)
+
 kooyong = load_kooyong_boundary()
 
-# 🧭 GEOCODE AND CHECK
 if kooyong is not None and address_input.strip():
-    geolocator = Nominatim(user_agent="kooyong_locator")
-
     try:
-        location = geolocator.geocode(
-            address_input,
-            country_codes="au",
-            addressdetails=True,
-        )
+        location = safe_geocode(address_input)
     except GeocoderUnavailable:
-        st.error("⚠️ Geocoding temporarily unavailable.")
+        st.error("⚠️ Geocoding service temporarily unavailable. This may be due to rate-limiting. Please wait a few seconds and try again.")
         location = None
 
     if location and location.raw.get("address", {}).get("state") == "Victoria":
@@ -87,3 +89,4 @@ if kooyong is not None and address_input.strip():
         st_folium(m, width=1000, height=600)
     else:
         st.warning("⚠️ Address not found in Victoria, Australia.")
+
