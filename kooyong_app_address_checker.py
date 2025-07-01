@@ -71,7 +71,7 @@ if address_input:
                 # Attempt to extract geometry from OSM (optional advanced step)
                 import osmnx as ox
                 tags = {'highway': True}
-                streets = ox.geometries_from_point((location.latitude, location.longitude), dist=100, tags=tags)
+                streets = ox.features.geometries_from_point((location.latitude, location.longitude), dist=100, tags=tags)
                 streets = streets.to_crs("EPSG:4326")
 
                 for _, row in streets.iterrows():
