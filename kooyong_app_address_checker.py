@@ -33,6 +33,7 @@ def load_kooyong_boundary():
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_dir)
 
+   
     # Find .shp inside nested folders
     shp_file = None
     for root, dirs, files in os.walk(extract_dir):
@@ -61,12 +62,16 @@ if kooyong is not None and address_input.strip():
     geolocator = Nominatim(user_agent="kooyong_locator")
 
     try:
-        location = geolocator.geocode(address_input)
+        location = geolocator.geocode(
+            address_input,
+            country_codes="au",
+            addressdetails=True,
+        )
     except GeocoderUnavailable:
         st.error("⚠️ Geocoding temporarily unavailable.")
         location = None
 
-    if location:
+    if location and location.raw.get("address", {}).get("state") == "Victoria":
         point = Point(location.longitude, location.latitude)
         within = kooyong.geometry.iloc[0].contains(point)
 
@@ -80,7 +85,6 @@ if kooyong is not None and address_input.strip():
         folium.Marker([location.latitude, location.longitude], tooltip="Your address", icon=folium.Icon(color='blue')).add_to(m)
         folium.GeoJson(kooyong.geometry.iloc[0], name="Kooyong Boundary").add_to(m)
 
-        st_folium(m, width=1000, height=600)
-    else:
-        st.warning("⚠️ Address not found or outside Australia.")
-
+        st_folium(m, width=1000, height=600)␊
+    else:␊
+        st.warning("⚠️ Address not found in Victoria, Australia.")
