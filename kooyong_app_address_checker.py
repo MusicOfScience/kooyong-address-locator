@@ -33,7 +33,6 @@ def load_kooyong_boundary():
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_dir)
 
-    (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
 diff --git a/kooyong_app_address_checker.py b/kooyong_app_address_checker.py
 index 969117746f5788b48cc34b1c62815cf7d7db765c..6cad10cffd9ccaa91ea2076fc181100b47253267 100644
 --- a/kooyong_app_address_checker.py
