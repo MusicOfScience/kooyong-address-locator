@@ -46,12 +46,15 @@ df = load_street_csv()
 
 # 🛑 Do NOT cache this function — polygon input is unhashable
 def get_osm_street_geometries(kooyong_polygon):
+    import osmnx as ox
     ox.settings.log_console = False
     ox.settings.use_cache = True
+
     tags = {"highway": True}
-    osm_gdf = ox.geometries_from_polygon(kooyong_polygon, tags)
+    osm_gdf = ox.features_from_polygon(kooyong_polygon, tags)
     osm_gdf = osm_gdf[~osm_gdf["name"].isna()]
     return osm_gdf[["name", "geometry"]].reset_index(drop=True)
+
 
 # Call it with just the polygon (not full GeoDataFrame)
 kooyong_poly_geom = kooyong_gdf.geometry.iloc[0]
