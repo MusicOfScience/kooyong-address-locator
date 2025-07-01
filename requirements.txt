@@ -1,6 +1,6 @@
-streamlit
+streamlit>=1.25
 geopandas
-pandas
 folium
 streamlit-folium
+shapely
 geopy
