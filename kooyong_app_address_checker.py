@@ -6,86 +6,95 @@ from folium import Marker, GeoJson
 from streamlit_folium import st_folium
 from shapely.geometry import Point
 from geopy.geocoders import Nominatim
-import matplotlib.pyplot as plt
+from geopy.exc import GeocoderUnavailable
 
-# ------------------------------
-# 🧭 Page Config
-st.set_page_config(page_title="Kooyong Streets with Suburb Lookup", layout="centered")
+# 📄 Page configuration
+st.set_page_config(page_title="Kooyong Electorate Address Checker", layout="wide")
 st.title("🗺️ Kooyong Streets with Suburb Lookup")
 
-# ------------------------------
-# 📂 Load suburb/street CSV
+# 🔁 Cached loading functions
 @st.cache_data
-def load_street_data():
-    return pd.read_csv("kooyong_street_suburb_lookup.csv")  # Expects headers: suburb, street_name, street_lower, suburb_lower
-
-street_df = load_street_data()
-
-# ------------------------------
-# 📍 Geocode address function
-@st.cache_data
-def geocode_address(address):
-    geolocator = Nominatim(user_agent="kooyong-locator")
-    location = geolocator.geocode(address)
-    return location
-
-# ------------------------------
-# 🗺️ Load Kooyong shapefile
-@st.cache_data
-def load_kooyong_shape():
+def load_kooyong_boundary():
     return gpd.read_file("E_VIC24_region.shp")
 
-kooyong_shape = load_kooyong_shape()
-kooyong_shape = kooyong_shape.to_crs(epsg=4326)  # Ensure it's in lat/lon for folium
+@st.cache_data
+def load_street_data():
+    return pd.read_csv("kooyong_streets.csv")  # headers: suburb, street_name, street_lower, suburb_lower
 
-# ------------------------------
-# 🌐 Map style selector
-map_style = st.selectbox("Choose a map style:", ["OpenStreetMap", "CartoDB Positron", "Stamen Toner", "Stamen Terrain"])
+@st.cache_data
+def geocode_address(address):
+    try:
+        geolocator = Nominatim(user_agent="kooyong-locator")
+        return geolocator.geocode(address)
+    except GeocoderUnavailable:
+        return None
 
-# ------------------------------
-# 🧾 Address Input
-address_input = st.text_input("Enter a street address in Victoria:", "")
+# 🗺️ Load files
+kooyong_gdf = load_kooyong_boundary()
+street_df = load_street_data()
 
+# 📥 User input
+address_input = st.text_input("Enter an address (e.g., 145 Camberwell Road):")
+
+# 🧠 Process and show result
 if address_input:
-    address = address_input.strip()
-    location = geocode_address(address + ", Victoria, Australia")
+    location = geocode_address(address_input)
 
-    if location:
-        point_geom = Point(location.longitude, location.latitude)
-        is_in_kooyong = kooyong_shape.contains(point_geom).any()
+    if not location:
+        st.error("⚠️ Could not geocode the address.")
+    else:
+        point = Point(location.longitude, location.latitude)
+        inside = kooyong_gdf.contains(point).any()
 
-        # Match with lookup table
-        address_lower = address.lower()
-        matching_row = street_df[street_df['street_lower'].apply(lambda x: x in address_lower)]
+        if inside:
+            st.success("✅ This address is within the Kooyong electorate.")
+        else:
+            st.warning("❌ This address is not within Kooyong.")
 
-        suburb_display = matching_row['suburb'].values[0] if not matching_row.empty else "Unknown suburb"
+        # 🗺️ Start building map
+        m = folium.Map(location=[location.latitude, location.longitude], zoom_start=16)
 
-        st.markdown(f"### {address_input}<br>In Kooyong: {'✅ Yes' if is_in_kooyong else '❌ No'}", unsafe_allow_html=True)
-
-        # ------------------------------
-        # 🗺️ Map setup
-        folium_map = folium.Map(location=[location.latitude, location.longitude], zoom_start=15, tiles=map_style)
-
-        # 🟦 Kooyong shape in teal with 70% opacity
-        GeoJson(
-            kooyong_shape,
+        # Draw Kooyong boundary
+        folium.GeoJson(
+            kooyong_gdf,
             name="Kooyong Boundary",
-            style_function=lambda feature: {
-                "fillColor": "#0CC0DF",
-                "color": "#0CC0DF",
+            style_function=lambda x: {
+                "fillColor": "#00000000",
+                "color": "#666666",
                 "weight": 2,
-                "fillOpacity": 0.7,
+                "dashArray": "5, 5"
             }
-        ).add_to(folium_map)
+        ).add_to(m)
 
-        # 🔴 Address Marker (small pin-like marker)
+        # Find street name component from address
+        words = address_input.lower().split()
+        street_name = " ".join(w for w in words if w not in ['road', 'rd', 'street', 'st', 'avenue', 'ave'])
+        matched = street_df[street_df['street_lower'].str.contains(street_name, na=False)]
+
+        if not matched.empty:
+            for _, row in matched.iterrows():
+                match_str = f"{row['street_name']}, {row['suburb']}, VIC"
+                segment_loc = geocode_address(match_str)
+                if segment_loc:
+                    seg_point = Point(segment_loc.longitude, segment_loc.latitude)
+                    folium.CircleMarker(
+                        location=[seg_point.y, seg_point.x],
+                        radius=5,
+                        color="#0CC0DF",
+                        fill=True,
+                        fill_color="#0CC0DF",
+                        fill_opacity=0.7,
+                        popup=f"{row['street_name']}, {row['suburb']}"
+                    ).add_to(m)
+        else:
+            st.info("ℹ️ No matching street segment found in the dataset.")
+
+        # Add red address pin
         Marker(
             location=[location.latitude, location.longitude],
-            icon=folium.Icon(color='red', icon='map-pin', prefix='fa')
-        ).add_to(folium_map)
+            popup=address_input,
+            icon=folium.Icon(color='red', icon='map-pin')
+        ).add_to(m)
 
-        # 🖼️ Display map
-        st_data = st_folium(folium_map, width=700, height=500)
-
-    else:
-        st.error("Address not found. Please try again with more detail (e.g. include suburb or number).")
+        # Show the final map
+        st_folium(m, width=1200, height=600)
