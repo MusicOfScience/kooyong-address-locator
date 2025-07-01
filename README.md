@@ -1,23 +1,17 @@
-# 🗺️ Kooyong Boundary Locator
+# 📍 Kooyong Electorate Address Checker
 
-This app displays the 2025 Kooyong electoral boundary and lets you:
-- Check if an address falls inside Kooyong
-- View a stylised map with road overlays
-- Download the boundary map
+A simple Streamlit app that lets you check if an address in Victoria falls within the federal electorate of Kooyong.
 
-## 🚀 How to Use
+## 🚀 Features
 
-1. Visit the deployed app: [Streamlit Cloud](https://streamlit.io/cloud)
-2. Type any Victorian address (e.g., "385 Toorak Rd, South Yarra")
-2. Type any Victorian address (e.g., "385 Toorak Rd, South Yarra"). The geocoder only searches within Victoria, Australia.
-3. The map updates and confirms in/out status.
+- Enter any Victorian address
+- See if it lies within Kooyong
+- View the result on an interactive map
+- Explore boundaries using Folium map styles
 
-## 🗂️ Update the Boundary
+## 📦 Requirements
 
-To update for future redistributions:
-1. Replace `data/Vic-october-2024-esri.zip` with a new AEC ZIP file
-2. Redeploy the app — Streamlit will auto-refresh
+Install dependencies with:
 
----
-
-🛠️ Built with: Streamlit, GeoPandas, OSMnx
+```bash
+pip install -r requirements.txt
