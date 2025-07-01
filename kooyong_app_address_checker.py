@@ -1,83 +1,106 @@
 import streamlit as st
 import geopandas as gpd
 import pandas as pd
-import osmnx as ox
-import matplotlib.pyplot as plt
+import folium
+from folium import Marker, GeoJson
+from streamlit_folium import st_folium
 from shapely.geometry import Point
 from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderUnavailable
-
-st.set_page_config(page_title="Kooyong Electorate Address Checker", layout="wide")
-st.title("🗺️ Kooyong Streets with Suburb Lookup")
 
 # ------------------------------
-# 📍 Geocode address function
+# 📍 Page configuration
+st.set_page_config(
+    page_title="Kooyong Streets with Suburb Lookup",
+    layout="wide",
+)
+
+st.title("📍 Kooyong Streets with Suburb Lookup")
+
+# ------------------------------
+# 🗺️ Map style selector
+map_tile = st.selectbox("Choose a map style:", ["OpenStreetMap", "CartoDB positron", "Stamen Terrain"])
+
+# ------------------------------
+# 📂 Load shapefile
 @st.cache_data
-def geocode_address(address):
-    geolocator = Nominatim(user_agent="kooyong-locator")
-    try:
-        location = geolocator.geocode(address)
-        return location
-    except GeocoderUnavailable:
-        return None
+def load_shapefile():
+    return gpd.read_file("E_VIC24_region.shp")
+
+kooyong_gdf = load_shapefile()
 
 # ------------------------------
-# 🗂️ Load Vic shapefile for Kooyong
-@st.cache_data
-def load_kooyong_boundary():
-    gdf = gpd.read_file("E_VIC24_region.shp")
-    return gdf[gdf["Elect_div"] == "Kooyong"]
-
-kooyong_gdf = load_kooyong_boundary()
-
-# ------------------------------
-# 📂 Load suburb/street CSV
+# 📂 Load street/suburb CSV
 @st.cache_data
 def load_street_data():
-    return pd.read_csv("kooyong_street_suburb_lookup.csv")  # expects headers: suburb, street_name, street_lower, suburb_lower
+    return pd.read_csv("kooyong_street_suburb_lookup.csv")  # expects: suburb, street_name, street_lower, suburb_lower
 
 street_df = load_street_data()
 
 # ------------------------------
-# 🌐 Map style selector
-map_style = st.selectbox("Choose a map style:", ["OpenStreetMap", "CartoDB positron", "Stamen Toner"])
+# 📍 Geocoding function
+@st.cache_data
+def geocode_address(address):
+    geolocator = Nominatim(user_agent="kooyong-locator")
+    return geolocator.geocode(address)
 
 # ------------------------------
-# 🔍 Address input
-address_input = st.text_input("Enter a street address in Victoria:")
+# 🧠 Helper: Check point in Kooyong
+def is_in_kooyong(point):
+    return kooyong_gdf.contains(point).any()
+
+# ------------------------------
+# 📍 Address input
+address_input = st.text_input("Enter a street address in Victoria:", placeholder="e.g. 145 Camberwell Road, Hawthorn East")
 
 if address_input:
-    location = geocode_address(address_input)
-    
+    location = geocode_address(f"{address_input}, Victoria, Australia")
     if location:
-        address_point = Point(location.longitude, location.latitude)
+        point = Point(location.longitude, location.latitude)
+        in_kooyong = is_in_kooyong(point)
 
-        # Check if address is inside Kooyong
-        in_kooyong = kooyong_gdf.geometry.unary_union.contains(address_point)
+        # 🗺️ Create map
+        m = folium.Map(location=[location.latitude, location.longitude], zoom_start=16, tiles=map_tile)
 
-        # Filter street match
-        address_words = address_input.lower().split()
-        street_match = street_df[street_df['street_lower'].isin(address_words)]
+        # 🟦 Add Kooyong boundary
+        GeoJson(
+            kooyong_gdf.geometry,
+            name="Kooyong Boundary",
+            style_function=lambda x: {"fillColor": "#00000000", "color": "#0CC0DF", "weight": 2}
+        ).add_to(m)
 
-        # Plot
-        fig, ax = plt.subplots(figsize=(10, 10))
-        kooyong_gdf.plot(ax=ax, color='lightgrey', edgecolor='black')
+        # 📍 Add marker
+        Marker(
+            location=[location.latitude, location.longitude],
+            popup=location.address,
+            icon=folium.Icon(color='lightblue', icon='map-marker', prefix='fa')
+        ).add_to(m)
 
-        # Highlight matching streets in teal with 70% opacity
-        if not street_match.empty:
-            match_streets = street_match['street_name'].str.lower().unique()
-            tags = {'highway': True}
-            osm_streets = ox.features_from_point((location.latitude, location.longitude), tags=tags, dist=300)
-            if not osm_streets.empty:
-                matched_osm = osm_streets[osm_streets['name'].str.lower().isin(match_streets)]
-                if not matched_osm.empty:
-                    matched_osm.plot(ax=ax, color='#0CC0DF', linewidth=3, alpha=0.7)
+        # 🧵 Attempt to highlight road
+        try:
+            import osmnx as ox
+            road = ox.features_from_point(
+                (location.latitude, location.longitude),
+                tags={"highway": True},
+                dist=80
+            )
+            if not road.empty:
+                gdf = gpd.GeoDataFrame(road, crs="EPSG:4326")
+                GeoJson(
+                    gdf.geometry,
+                    name="Highlighted Road",
+                    style_function=lambda x: {
+                        "color": "#0CC0DF",
+                        "weight": 4,
+                        "opacity": 0.7
+                    }
+                ).add_to(m)
+        except Exception as e:
+            st.warning(f"Could not highlight road segment: {e}")
 
-        # Red dot for location
-        ax.scatter(location.longitude, location.latitude, color='red', s=25, zorder=5)
+        # 🖼️ Render map
+        st.markdown(f"### {address_input}")
+        st.markdown(f"**In Kooyong:** {'✅ Yes' if in_kooyong else '❌ No'}")
+        st_data = st_folium(m, width=1000, height=600)
 
-        ax.set_title(f"{address_input}\nIn Kooyong: {'✅ Yes' if in_kooyong else '❌ No'}", fontsize=14)
-        ax.set_axis_off()
-        st.pyplot(fig)
     else:
-        st.error("⚠️ Could not geocode address.")
+        st.error("Could not geocode the address. Please try a more complete address (include suburb).")
