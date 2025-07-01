@@ -1,99 +1,61 @@
 import streamlit as st
 import geopandas as gpd
-import osmnx as ox
 import pandas as pd
-import shapely
+import osmnx as ox
+import pyproj
 from shapely.geometry import Point
-import folium
-from streamlit_folium import st_folium
 
-st.set_page_config(page_title="Kooyong Streets with Suburb Lookup", layout="wide")
+st.set_page_config(page_title="Kooyong Electorate Address Checker", layout="centered")
 
-# ──────────────────────────────
-# Load Kooyong AEC Boundary from ESRI Shapefile
-# ──────────────────────────────
+st.title("🗺️ Kooyong Streets with Suburb Lookup")
+st.markdown("Check whether a street or address is within the **Kooyong electorate** boundaries using official 2024 data.")
 
+# Load Kooyong boundary shapefile
 @st.cache_data
 def load_kooyong_boundary():
-    gdf = gpd.read_file("Vic-october-2024-esri.zip")
-    gdf = gdf.to_crs(epsg=4326)  # Ensure consistent CRS
-    kooyong_gdf = gdf[gdf["Elect_div"].str.upper() == "KOOYONG"]
-    return kooyong_gdf
+    gdf = gpd.read_file("E_VIC24_region.shp")
+    gdf = gdf.to_crs("EPSG:4326")
+    kooyong = gdf[gdf["Elect_div"] == "Kooyong"]
+    return kooyong
 
 kooyong_gdf = load_kooyong_boundary()
-kooyong_geom = kooyong_gdf.unary_union
 
-# ──────────────────────────────
-# Download OSM street geometries inside Kooyong boundary
-# ──────────────────────────────
-
+# Load street–suburb lookup CSV
 @st.cache_data
-def get_osm_street_geometries(_polygon):
-    tags = {"highway": True}
-    streets = ox.geometries_from_polygon(_polygon, tags=tags)
-    return streets
+def load_street_lookup():
+    return pd.read_csv("kooyong_street_suburb_lookup.csv")
 
-osm_streets = get_osm_street_geometries(kooyong_geom)
+lookup_df = load_street_lookup()
 
-# ──────────────────────────────
-# Extract and clean street names
-# ──────────────────────────────
+# Choose map style
+map_style = st.radio("Choose a map style:", ["OpenStreetMap", "CartoDB positron", "Stamen toner"])
 
-@st.cache_data
-def extract_unique_street_names(streets):
-    name_col = "name"
-    if name_col not in streets.columns:
-        return []
-    names = streets[name_col].dropna().unique()
-    return sorted(names)
+# Address input
+address_input = st.text_input("Enter a street address in Victoria:")
 
-street_names = extract_unique_street_names(osm_streets)
+# Geocode and check if in Kooyong
+if address_input:
+    try:
+        geocoder = ox.geocoder.nominatim.Nominatim()
+        location = geocoder.geocode(f"{address_input}, Victoria, Australia", exactly_one=True)
 
-# ──────────────────────────────
-# Sidebar UI
-# ──────────────────────────────
+        if location:
+            address_point = Point(location.longitude, location.latitude)
+            in_kooyong = kooyong_gdf.contains(address_point).any()
 
-st.sidebar.header("🗺️ Kooyong Street & Suburb Lookup")
-street_input = st.sidebar.selectbox("Select a street in Kooyong:", street_names)
+            st.map(pd.DataFrame({'lat': [location.latitude], 'lon': [location.longitude]}), zoom=16)
 
-# ──────────────────────────────
-# Filter for selected street
-# ──────────────────────────────
+            st.success("✅ This address is **within Kooyong**." if in_kooyong else "❌ This address is **outside Kooyong**.")
+        else:
+            st.warning("⚠️ Could not geocode address.")
+    except Exception as e:
+        st.error(f"Error: {e}")
 
-selected = osm_streets[osm_streets["name"] == street_input]
-
-# ──────────────────────────────
-# Map Display
-# ──────────────────────────────
-
-m = folium.Map(location=[-37.82, 145.05], zoom_start=14)
-
-# Show Kooyong boundary
-folium.GeoJson(kooyong_gdf.geometry.iloc[0], name="Kooyong Boundary", style_function=lambda x: {
-    "fillColor": "#0CC0DF", "color": "#190D51", "weight": 2, "fillOpacity": 0.1
-}).add_to(m)
-
-# Add selected street
-for _, row in selected.iterrows():
-    geom = row.geometry
-    if isinstance(geom, shapely.geometry.LineString):
-        folium.PolyLine(locations=[(pt[1], pt[0]) for pt in geom.coords], color="red").add_to(m)
-    elif isinstance(geom, shapely.geometry.MultiLineString):
-        for line in geom:
-            folium.PolyLine(locations=[(pt[1], pt[0]) for pt in line.coords], color="red").add_to(m)
-
-# Show map
-st_data = st_folium(m, width=1000, height=600)
-
-# ──────────────────────────────
-# Display Suburb Info (if available)
-# ──────────────────────────────
-
-if "addr:suburb" in selected.columns:
-    suburbs = selected["addr:suburb"].dropna().unique()
-    if len(suburbs):
-        st.info(f"📍 This street is located in: **{', '.join(suburbs)}**.")
-    else:
-        st.warning("No suburb information found in OpenStreetMap data.")
-else:
-    st.warning("No `addr:suburb` column found in OSM data.")
+# Optional street/suburb lookup table
+with st.expander("🔍 Explore Kooyong Suburbs and Streets"):
+    st.dataframe(lookup_df.rename(columns={
+        "suburb": "Suburb",
+        "street_name": "Street",
+        "street_lower": "Street (lower)",
+        "suburb_lower": "Suburb (lower)"
+    }))
