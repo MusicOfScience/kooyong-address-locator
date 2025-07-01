@@ -19,7 +19,7 @@ def load_kooyong_boundary():
 
 @st.cache_data
 def load_street_data():
-    return pd.read_csv("kooyong_streets.csv")  # headers: suburb, street_name, street_lower, suburb_lower
+    return pd.read_csv("kooyong_street_suburb_lookup.csv")  # headers: suburb, street_name, street_lower, suburb_lower
 
 @st.cache_data
 def geocode_address(address):
