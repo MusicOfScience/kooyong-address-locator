@@ -9,6 +9,7 @@ This app displays the 2025 Kooyong electoral boundary and lets you:
 
 1. Visit the deployed app: [Streamlit Cloud](https://streamlit.io/cloud)
 2. Type any Victorian address (e.g., "385 Toorak Rd, South Yarra")
+2. Type any Victorian address (e.g., "385 Toorak Rd, South Yarra"). The geocoder only searches within Victoria, Australia.
 3. The map updates and confirms in/out status.
 
 ## 🗂️ Update the Boundary
