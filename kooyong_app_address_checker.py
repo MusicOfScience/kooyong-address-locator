@@ -34,7 +34,7 @@ kooyong_gdf = load_kooyong_boundary()
 # 📂 Load suburb/street CSV
 @st.cache_data
 def load_street_data():
-    return pd.read_csv("kooyong_streets.csv")  # expects headers: suburb, street_name, street_lower, suburb_lower
+    return pd.read_csv("kooyong_street_suburb_lookup.csv")  # expects headers: suburb, street_name, street_lower, suburb_lower
 
 street_df = load_street_data()
 
