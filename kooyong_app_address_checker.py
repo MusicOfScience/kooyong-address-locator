@@ -1,139 +1,89 @@
-# 📍 Kooyong Electorate Address Checker & Suburb Lookup
-
 import streamlit as st
-import geopandas as gpd
 import pandas as pd
+import geopandas as gpd
 import folium
-from shapely.geometry import Point, Polygon, MultiPolygon
+from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
-from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
-import json
-from datetime import datetime, timezone
-import os
-import time
-import zipfile
 import osmnx as ox
+from shapely.geometry import Polygon, Point
+from geopy.geocoders import Nominatim
 
-st.set_page_config(page_title="Kooyong Electorate Checker", layout="wide")
+st.set_page_config(page_title="Kooyong Streets with Suburb Lookup", layout="wide")
 st.title("🗺️ Kooyong Streets with Suburb Lookup")
 
-# ──────────────────────────────────────────────────────────────
-# 📦 Load AEC Kooyong shapefile
-@st.cache_data(show_spinner=False)
-def load_kooyong_boundary():
-    zip_path = "Vic-october-2024-esri.zip"
-    extract_dir = "extracted_shapefiles"
-    if not os.path.exists(extract_dir):
-        os.makedirs(extract_dir)
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extract_dir)
-
-    shp_file = None
-    for root, _, files in os.walk(extract_dir):
-        for f in files:
-            if f.endswith(".shp") and "region" in f.lower():
-                shp_file = os.path.join(root, f)
-                break
-
-    if not shp_file:
-        st.error("❌ AEC shapefile not found.")
-        return None
-
-    gdf = gpd.read_file(shp_file)
-    return gdf[gdf["Elect_div"] == "Kooyong"].to_crs(epsg=4326)
-
-kooyong_gdf = load_kooyong_boundary()
-kooyong_geom = kooyong_gdf.geometry.iloc[0] if kooyong_gdf is not None else None
-
-# ──────────────────────────────────────────────────────────────
-# 🧭 Load suburb lookup CSV
-@st.cache_data(show_spinner=False)
+# ──────────────────────────────
+# Load Kooyong street-suburb CSV
+# ──────────────────────────────
+@st.cache_data
 def load_suburb_lookup():
-    csv_path = "kooyong_street_suburb_lookup.csv"
-    df = pd.read_csv(csv_path)
-    df["street_lower"] = df["street"].str.lower()
+    df = pd.read_csv("kooyong_street_suburb_lookup.csv")
+    df["street_lower"] = df["street_name"].str.lower()
     df["suburb"] = df["suburb"].str.title()
     return df
 
 lookup_df = load_suburb_lookup()
 
-# ──────────────────────────────────────────────────────────────
-# 🚏 Get OSM road geometries inside Kooyong
-def get_osm_street_geometries():
+# ──────────────────────────────────────────────
+# Define Kooyong boundary manually or dynamically
+# ──────────────────────────────────────────────
+@st.cache_data
+def get_kooyong_geometry():
+    kooyong_suburbs = [
+        "Kew", "Kew East", "Balwyn", "Balwyn North", "Deepdene", "Canterbury",
+        "Camberwell", "Surrey Hills", "Mont Albert", "Mont Albert North",
+        "Malvern", "Malvern East", "Toorak", "Armadale", "Glen Iris", "Prahran"
+    ]
+    gdf = ox.geocode_to_gdf([f"{suburb}, Victoria, Australia" for suburb in kooyong_suburbs])
+    return gdf.unary_union.convex_hull
+
+kooyong_geom = get_kooyong_geometry()
+
+# ──────────────────────────────
+# Load OSM street geometries
+# ──────────────────────────────
+@st.cache_data
+def get_osm_street_geometries(polygon):
     tags = {"highway": True}
-    gdf = ox.features_from_polygon(kooyong_geom, tags=tags)
-    gdf = gdf[["geometry", "name"]].dropna(subset=["name"])
-    gdf = gdf[gdf.geometry.geom_type.isin(["LineString", "MultiLineString"])]
-    gdf["name_lower"] = gdf["name"].str.lower()
-    return gdf
+    return ox.geometries_from_polygon(polygon, tags)
 
-osm_streets = get_osm_street_geometries()
+osm_streets = get_osm_street_geometries(kooyong_geom)
 
-# ──────────────────────────────────────────────────────────────
-# 🌐 Geocoder
-def geocode_address(address, viewbox):
+# ──────────────────────────────
+# Create base map with street tooltips
+# ──────────────────────────────
+def generate_map():
+    center = [kooyong_geom.centroid.y, kooyong_geom.centroid.x]
+    fmap = folium.Map(location=center, zoom_start=14, tiles=st.selectbox("Choose a map style:", [
+        "OpenStreetMap", "Stamen Toner", "CartoDB positron", "CartoDB dark_matter"
+    ]))
+
+    for _, row in lookup_df.iterrows():
+        matches = osm_streets[osm_streets["name"].str.lower() == row["street_lower"]]
+        for _, match in matches.iterrows():
+            geom = match.geometry
+            if geom.geom_type == "LineString":
+                folium.PolyLine(locations=[(pt[1], pt[0]) for pt in geom.coords],
+                                tooltip=f'{row["street_name"]} — {row["suburb"]}',
+                                color="blue", weight=3).add_to(fmap)
+
+    return fmap
+
+st_data = st_folium(generate_map(), width=1000, height=600)
+
+# ──────────────────────────────
+# Address lookup box
+# ──────────────────────────────
+user_input = st.text_input("Enter a street address in Victoria:")
+if user_input:
     geolocator = Nominatim(user_agent="kooyong_locator")
-    try:
-        location = geolocator.geocode(address, country_codes="au", addressdetails=True,
-                                      viewbox=viewbox, bounded=True)
-        return location
-    except (GeocoderTimedOut, GeocoderUnavailable):
-        return None
-
-# ──────────────────────────────────────────────────────────────
-# 🧾 Log queries
-def log_geocode(input_query, result_type, latlon=None, suburb=None):
-    record = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "query": input_query,
-        "result_type": result_type,
-        "coords": latlon,
-        "suburb": suburb,
-    }
-    with open("geocode_log.json", "a") as f:
-        json.dump(record, f)
-        f.write("\n")
-
-# ──────────────────────────────────────────────────────────────
-# 🗺️ Map setup
-style = st.selectbox("Choose a map style:", [
-    "OpenStreetMap", "CartoDB Positron", "CartoDB Dark_Matter", "Stamen Toner", "Stamen Terrain"
-])
-
-address = st.text_input("Enter a street address in Victoria:")
-
-m = folium.Map(location=[-37.82, 145.05], zoom_start=13, tiles=style)
-
-# Show Kooyong boundary
-if kooyong_geom:
-    folium.GeoJson(kooyong_geom, name="Kooyong", style_function=lambda x: {
-        "fillColor": "#0cc0df", "color": "#190d51", "weight": 2, "fillOpacity": 0.1
-    }).add_to(m)
-
-# Show streets from OSM with suburb tooltips
-for _, row in osm_streets.iterrows():
-    match = lookup_df[lookup_df["street_lower"] == row["name_lower"]]
-    tooltip = f"{row['name']}" if match.empty else f"{row['name']} → {match.iloc[0]['suburb']}"
-    folium.GeoJson(row["geometry"], tooltip=tooltip,
-                   style_function=lambda x: {"color": "#333", "weight": 2}).add_to(m)
-
-# 📍 If address entered
-if address.strip() and kooyong_geom:
-    bounds = kooyong_geom.bounds
-    viewbox = [[bounds[1], bounds[0]], [bounds[3], bounds[2]]]
-    location = geocode_address(address, viewbox)
+    location = geolocator.geocode(f"{user_input}, Victoria, Australia")
     if location:
-        latlon = [location.latitude, location.longitude]
         point = Point(location.longitude, location.latitude)
-        inside = kooyong_geom.contains(point)
-
-        folium.Marker(latlon, tooltip="Your Address", icon=folium.Icon(color="blue")).add_to(m)
-
-        st.success("✅ Inside Kooyong" if inside else "🚫 Outside Kooyong")
-        log_geocode(address, "success", latlon, location.raw.get("address", {}).get("suburb"))
+        st.success(f"📍 Found: {location.address}")
+        st.map(pd.DataFrame({'lat': [location.latitude], 'lon': [location.longitude]}))
+        if kooyong_geom.contains(point):
+            st.info("✅ This address is **within Kooyong**.")
+        else:
+            st.warning("⚠️ This address is **outside Kooyong**.")
     else:
-        st.warning("⚠️ Could not geocode address.")
-        log_geocode(address, "fail")
-
-st_folium(m, width=1000, height=600)
+        st.error("⚠️ Could not geocode address.")
