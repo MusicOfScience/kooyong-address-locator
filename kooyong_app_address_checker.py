@@ -85,7 +85,13 @@ def geocode_with_fallback(query, viewbox=None):
     geolocator = Nominatim(user_agent="kooyong_locator_app")
     time.sleep(1)
     try:
-        location = geolocator.geocode(query, country_codes="au", addressdetails=True, viewbox=viewbox, bounded=True)
+        location = geolocator.geocode(
+    query,
+    country_codes="au",
+    addressdetails=True
+    # Remove viewbox and bounded for testing
+)
+
     except (GeocoderUnavailable, GeocoderTimedOut) as e:
         log_geocode(query, None, None, "timeout", str(e))
         return None, "timeout"
