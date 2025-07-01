@@ -5,93 +5,79 @@ import osmnx as ox
 import matplotlib.pyplot as plt
 from shapely.geometry import Point
 from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderUnavailable
 
-st.set_page_config(page_title="Kooyong Streets with Suburb Lookup", layout="wide")
+st.set_page_config(page_title="Kooyong Electorate Address Checker", layout="wide")
+st.title("🗺️ Kooyong Streets with Suburb Lookup")
 
-# ──────────────────────────────
+# ------------------------------
 # 📍 Geocode address function
 @st.cache_data
 def geocode_address(address):
     geolocator = Nominatim(user_agent="kooyong-locator")
-    location = geolocator.geocode(address)
-    return location
+    try:
+        location = geolocator.geocode(address)
+        return location
+    except GeocoderUnavailable:
+        return None
 
-# ──────────────────────────────
-# 📦 Load Kooyong boundary from shapefile
+# ------------------------------
+# 🗂️ Load Vic shapefile for Kooyong
 @st.cache_data
 def load_kooyong_boundary():
     gdf = gpd.read_file("E_VIC24_region.shp")
-    kooyong = gdf[gdf["Elect_div"] == "Kooyong"]
-    return kooyong
+    return gdf[gdf["Elect_div"] == "Kooyong"]
 
-# ──────────────────────────────
-# 📄 Load street lookup CSV
-@st.cache_data
-def load_suburb_lookup():
-    df = pd.read_csv("kooyong_street_suburb_lookup.csv")
-    df["street_lower"] = df["street_name"].str.lower()
-    df["suburb_lower"] = df["suburb"].str.lower()
-    return df
-
-# ──────────────────────────────
-# 🛣️ Get OSM roads in Kooyong
-@st.cache_data
-def get_osm_roads_within_boundary(polygon):
-    tags = {"highway": True}
-    return ox.features_from_polygon(polygon, tags=tags)
-
-# ──────────────────────────────
-# 📍 UI + Lookup
-st.title("🗺️ Kooyong Streets with Suburb Lookup")
-
-address_input = st.text_input("Enter an address in Kooyong (e.g., '145 Camberwell Road')")
-
-lookup_df = load_suburb_lookup()
 kooyong_gdf = load_kooyong_boundary()
-kooyong_polygon = kooyong_gdf.unary_union.convex_hull
+
+# ------------------------------
+# 📂 Load suburb/street CSV
+@st.cache_data
+def load_street_data():
+    return pd.read_csv("kooyong_streets.csv")  # expects headers: suburb, street_name, street_lower, suburb_lower
+
+street_df = load_street_data()
+
+# ------------------------------
+# 🌐 Map style selector
+map_style = st.selectbox("Choose a map style:", ["OpenStreetMap", "CartoDB positron", "Stamen Toner"])
+
+# ------------------------------
+# 🔍 Address input
+address_input = st.text_input("Enter a street address in Victoria:")
 
 if address_input:
     location = geocode_address(address_input)
-    if location is None:
-        st.error("⚠️ Could not geocode address.")
-    else:
+    
+    if location:
         address_point = Point(location.longitude, location.latitude)
 
-        # Match street name
-        matched_street = None
-        for street in lookup_df["street_lower"].unique():
-            if street in address_input.lower():
-                matched_street = street
-                break
+        # Check if address is inside Kooyong
+        in_kooyong = kooyong_gdf.geometry.unary_union.contains(address_point)
 
+        # Filter street match
+        address_words = address_input.lower().split()
+        street_match = street_df[street_df['street_lower'].isin(address_words)]
+
+        # Plot
         fig, ax = plt.subplots(figsize=(10, 10))
-        kooyong_gdf.boundary.plot(ax=ax, color="black", linewidth=1)
+        kooyong_gdf.plot(ax=ax, color='lightgrey', edgecolor='black')
 
-        # Plot red dot at geocoded location
-        ax.scatter(
-            address_point.x,
-            address_point.y,
-            color="red",
-            s=25,  # small dot
-            label="Entered Address",
-            zorder=5
-        )
+        # Highlight matching streets in teal with 70% opacity
+        if not street_match.empty:
+            match_streets = street_match['street_name'].str.lower().unique()
+            tags = {'highway': True}
+            osm_streets = ox.features_from_point((location.latitude, location.longitude), tags=tags, dist=300)
+            if not osm_streets.empty:
+                matched_osm = osm_streets[osm_streets['name'].str.lower().isin(match_streets)]
+                if not matched_osm.empty:
+                    matched_osm.plot(ax=ax, color='#0CC0DF', linewidth=3, alpha=0.7)
 
-        # Highlight OSM roads inside Kooyong
-        osm_gdf = get_osm_roads_within_boundary(kooyong_polygon)
+        # Red dot for location
+        ax.scatter(location.longitude, location.latitude, color='red', s=25, zorder=5)
 
-        # If street match found, highlight it
-        if matched_street:
-            match = osm_gdf[osm_gdf["name"].str.lower().str.contains(matched_street, na=False)]
-            if not match.empty:
-                match.plot(ax=ax, color="#0CC0DF", alpha=0.7, linewidth=3, label="Matched Street")
-
-        plt.axis("off")
+        ax.set_title(f"{address_input}\nIn Kooyong: {'✅ Yes' if in_kooyong else '❌ No'}", fontsize=14)
+        ax.set_axis_off()
         st.pyplot(fig)
-
-        # Display matched suburb
-        matched_rows = lookup_df[lookup_df["street_lower"] == matched_street]
-        if not matched_rows.empty:
-            st.success(f"✅ Suburb match: **{matched_rows.iloc[0]['suburb']}**")
-        else:
-            st.info("ℹ️ No exact suburb match found in lookup table.")
+    else:
+        st.error("⚠️ Could not geocode address.")
