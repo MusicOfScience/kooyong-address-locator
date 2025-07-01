@@ -43,7 +43,47 @@ if address_input:
             address_point = Point(location.longitude, location.latitude)
             in_kooyong = kooyong_gdf.contains(address_point).any()
 
-            st.map(pd.DataFrame({'lat': [location.latitude], 'lon': [location.longitude]}), zoom=16)
+            # Create a small point GeoDataFrame for plotting
+            address_gdf = gpd.GeoDataFrame(
+                pd.DataFrame({'name': [address_input]}),
+                geometry=[address_point],
+                crs="EPSG:4326"
+            )
+
+            # Display the address as a small teal pin
+            import folium
+            from streamlit_folium import st_folium
+
+            m = folium.Map(location=[location.latitude, location.longitude], zoom_start=17, tiles=map_style)
+
+            folium.Marker(
+                [location.latitude, location.longitude],
+                popup=address_input,
+                icon=folium.Icon(color="blue", icon="map-marker", prefix="fa")
+            ).add_to(m)
+
+            # Optional: highlight the street line geometry if found in lookup
+            street_match = lookup_df[
+                lookup_df["street_lower"].str.lower().str.strip().isin([address_input.lower().strip()])
+            ]
+
+            if not street_match.empty:
+                # Attempt to extract geometry from OSM (optional advanced step)
+                import osmnx as ox
+                tags = {'highway': True}
+                streets = ox.geometries_from_point((location.latitude, location.longitude), dist=100, tags=tags)
+                streets = streets.to_crs("EPSG:4326")
+
+                for _, row in streets.iterrows():
+                    if row.geometry.geom_type == "LineString":
+                        folium.PolyLine(
+                            locations=[(lat, lon) for lon, lat in row.geometry.coords],
+                            color="#0CC0DF",
+                            weight=6,
+                            opacity=0.7,
+                        ).add_to(m)
+
+            st_folium(m, width=700, height=500)
 
             st.success("✅ This address is **within Kooyong**." if in_kooyong else "❌ This address is **outside Kooyong**.")
         else:
