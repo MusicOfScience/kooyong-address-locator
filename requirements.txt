@@ -1,6 +1,7 @@
-streamlit>=1.25
+streamlit
 geopandas
 folium
-streamlit-folium
 shapely
-geopy
+osmnx>=1.6.0
+streamlit-folium
+
