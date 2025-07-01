@@ -1,5 +1,3 @@
-!pip install --upgrade osmnx --quiet
-
 # kooyong_app_address_checker.py
 
 import streamlit as st
