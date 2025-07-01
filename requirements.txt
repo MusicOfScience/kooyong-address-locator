@@ -1,7 +1,5 @@
-streamlit
-folium
-streamlit-folium
 geopandas
-shapely
+folium
+streamlit
+streamlit-folium
 geopy
-matplotlib
