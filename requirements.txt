@@ -2,6 +2,7 @@ streamlit
 geopandas
 folium
 streamlit-folium
-osmnx
+osmnx>=1.7.0
 geopy
+
 
