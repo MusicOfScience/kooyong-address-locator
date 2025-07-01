@@ -1,9 +1,7 @@
-matplotlib
 streamlit
-geopandas
 folium
 streamlit-folium
-osmnx>=1.7.0
+geopandas
+shapely
 geopy
-
-
+matplotlib
