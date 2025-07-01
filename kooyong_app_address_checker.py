@@ -1,9 +1,9 @@
 import streamlit as st
 import geopandas as gpd
 import pandas as pd
-import osmnx as ox
-import pyproj
 from shapely.geometry import Point
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderUnavailable
 
 st.set_page_config(page_title="Kooyong Electorate Address Checker", layout="centered")
 
@@ -36,8 +36,8 @@ address_input = st.text_input("Enter a street address in Victoria:")
 # Geocode and check if in Kooyong
 if address_input:
     try:
-        geocoder = ox.geocoder.nominatim.Nominatim()
-        location = geocoder.geocode(f"{address_input}, Victoria, Australia", exactly_one=True)
+        geolocator = Nominatim(user_agent="kooyong_checker")
+        location = geolocator.geocode(f"{address_input}, Victoria, Australia", timeout=10)
 
         if location:
             address_point = Point(location.longitude, location.latitude)
@@ -48,6 +48,8 @@ if address_input:
             st.success("✅ This address is **within Kooyong**." if in_kooyong else "❌ This address is **outside Kooyong**.")
         else:
             st.warning("⚠️ Could not geocode address.")
+    except GeocoderUnavailable:
+        st.error("⚠️ Geocoding service is temporarily unavailable.")
     except Exception as e:
         st.error(f"Error: {e}")
 
