@@ -33,32 +33,37 @@ def load_kooyong_boundary():
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_dir)
 
-   
-    # Find .shp inside nested folders
-    shp_file = None
-    for root, dirs, files in os.walk(extract_dir):
-        for f in files:
-            if f.endswith(".shp"):
-                shp_file = os.path.join(root, f)
-                break
-
-    if not shp_file:
-        st.error(f"❌ No .shp file found in {extract_dir}.")
-        return None
-
-    gdf = gpd.read_file(shp_file)
-
-    if "Elect_div" not in gdf.columns:
-        st.error("❌ 'Elect_div' column not found in shapefile.")
-        return None
-
-    kooyong = gdf[gdf["Elect_div"] == "Kooyong"]
-    return kooyong
-
-kooyong = load_kooyong_boundary()
-
-# 🧭 GEOCODE AND CHECK
-if kooyong is not None and address_input.strip():
+    (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/kooyong_app_address_checker.py b/kooyong_app_address_checker.py
+index 969117746f5788b48cc34b1c62815cf7d7db765c..6cad10cffd9ccaa91ea2076fc181100b47253267 100644
+--- a/kooyong_app_address_checker.py
++++ b/kooyong_app_address_checker.py
+@@ -36,51 +36,55 @@ def load_kooyong_boundary():
+     # Find .shp inside nested folders
+     shp_file = None
+     for root, dirs, files in os.walk(extract_dir):
+         for f in files:
+             if f.endswith(".shp"):
+                 shp_file = os.path.join(root, f)
+                 break
+ 
+     if not shp_file:
+         st.error(f"❌ No .shp file found in {extract_dir}.")
+         return None
+ 
+     gdf = gpd.read_file(shp_file)
+ 
+     if "Elect_div" not in gdf.columns:
+         st.error("❌ 'Elect_div' column not found in shapefile.")
+         return None
+ 
+     kooyong = gdf[gdf["Elect_div"] == "Kooyong"]
+     return kooyong
+ 
+ kooyong = load_kooyong_boundary()
+ 
+ # 🧭 GEOCODE AND CHECK
+ if kooyong is not None and address_input.strip():
     geolocator = Nominatim(user_agent="kooyong_locator")
 
     try:
@@ -74,17 +79,21 @@ if kooyong is not None and address_input.strip():
     if location and location.raw.get("address", {}).get("state") == "Victoria":
         point = Point(location.longitude, location.latitude)
         within = kooyong.geometry.iloc[0].contains(point)
-
-        if within:
-            st.success("✅ Inside Kooyong")
-        else:
-            st.warning("🚫 Outside Kooyong")
-
-        # 🗺️ FOLIUM MAP
-        m = folium.Map(location=[location.latitude, location.longitude], zoom_start=14, tiles=style)
-        folium.Marker([location.latitude, location.longitude], tooltip="Your address", icon=folium.Icon(color='blue')).add_to(m)
-        folium.GeoJson(kooyong.geometry.iloc[0], name="Kooyong Boundary").add_to(m)
-
-        st_folium(m, width=1000, height=600)␊
-    else:␊
+ 
+         if within:
+             st.success("✅ Inside Kooyong")
+         else:
+             st.warning("🚫 Outside Kooyong")
+ 
+         # 🗺️ FOLIUM MAP
+         m = folium.Map(location=[location.latitude, location.longitude], zoom_start=14, tiles=style)
+         folium.Marker([location.latitude, location.longitude], tooltip="Your address", icon=folium.Icon(color='blue')).add_to(m)
+         folium.GeoJson(kooyong.geometry.iloc[0], name="Kooyong Boundary").add_to(m)
+ 
+        st_folium(m, width=1000, height=600)
+    else:
         st.warning("⚠️ Address not found in Victoria, Australia.")
+ 
+ 
+EOF
+)
