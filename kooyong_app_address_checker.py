@@ -63,6 +63,7 @@ def load_kooyong_boundary():
 def get_kooyong_viewbox(gdf):
     try:
         bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
+        # Return reordered viewbox: [west_lon, south_lat, east_lon, north_lat]
         return [bounds[0], bounds[1], bounds[2], bounds[3]]
     except Exception as e:
         st.warning("⚠️ Could not compute bounding box.")
@@ -88,19 +89,31 @@ def log_geocode_result(input_address, location, within, method="none", error=Non
 @lru_cache(maxsize=100)
 def geocode_with_fallback(query, viewbox):
     geolocator = Nominatim(user_agent="kooyong_locator_app (https://github.com/MusicOfScience/kooyong-address-locator)")
-    time.sleep(1)  # Rate-limit buffer
+    time.sleep(1)
+
+    # 🔎 Validate viewbox
     try:
-        location = geolocator.geocode(
-            query,
-            country_codes="au",
-            addressdetails=True,
-            viewbox=viewbox,
-            bounded=True
-        )
-        if location:
-            return location, "bounded"
-    except:
+        lon1, lat1, lon2, lat2 = map(float, viewbox)
+        viewbox_formatted = [lon1, lat1, lon2, lat2]
+    except Exception as e:
+        viewbox_formatted = None
+
+    # 🧭 Try bounded
+    try:
+        if viewbox_formatted:
+            location = geolocator.geocode(
+                query,
+                country_codes="au",
+                addressdetails=True,
+                viewbox=viewbox_formatted,
+                bounded=True
+            )
+            if location:
+                return location, "bounded"
+    except Exception:
         pass
+
+    # 🔁 Fallback
     try:
         location = geolocator.geocode(
             query,
@@ -109,8 +122,9 @@ def geocode_with_fallback(query, viewbox):
         )
         if location:
             return location, "unbounded"
-    except:
+    except Exception:
         pass
+
     return None, "failed"
 
 kooyong = load_kooyong_boundary()
@@ -122,6 +136,8 @@ if kooyong is not None and address_input.strip():
         query = enrich_query(address_input)
         location, method = geocode_with_fallback(query, viewbox)
 
+        st.write("📦 Using bounding box:", viewbox)
+
         if location and location.raw.get("address", {}).get("state") == "Victoria":
             point = Point(location.longitude, location.latitude)
             within = kooyong.geometry.iloc[0].contains(point)
@@ -129,7 +145,7 @@ if kooyong is not None and address_input.strip():
             st.write("📍 Geocoded to:", (location.latitude, location.longitude))
             st.write("📎 Full address:", location.raw.get("display_name"))
             st.write("🏘️ Suburb:", location.raw.get("address", {}).get("suburb", "Unknown"))
-            st.write(f"🔎 Method used: `{method}`")
+            st.write(f"🔍 Method used: `{method}`")
 
             if within:
                 st.success("✅ This address is inside Kooyong.")
@@ -150,4 +166,3 @@ if kooyong is not None and address_input.strip():
             log_geocode_result(address_input, None, False, method=method, error="Not found or outside VIC")
     else:
         st.error("❌ Could not calculate Kooyong bounding box.")
-
