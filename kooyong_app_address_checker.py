@@ -1,4 +1,4 @@
-# 📍 Kooyong Electorate Address Checker – Clean Version
+# 📍 Kooyong Electorate Address Checker – AEC-Boundary Powered
 
 import streamlit as st
 import geopandas as gpd
@@ -31,11 +31,9 @@ def load_kooyong_boundary():
     if not os.path.exists(extract_dir):
         os.makedirs(extract_dir)
 
-    # Extract ZIP
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_dir)
 
-    # Find .shp file
     shp_file = None
     for root, dirs, files in os.walk(extract_dir):
         for f in files:
@@ -53,43 +51,56 @@ def load_kooyong_boundary():
         st.error("❌ 'Elect_div' column not found in shapefile.")
         return None
 
-    kooyong = gdf[gdf["Elect_div"] == "Kooyong"]
-    return kooyong
+    return gdf[gdf["Elect_div"] == "Kooyong"]
 
-# 🧭 GEOCODING WITH CACHE AND USER AGENT
-@lru_cache(maxsize=100)
-def safe_geocode(query):
-    time.sleep(1)  # Respect Nominatim rate limit
-    geolocator = Nominatim(user_agent="kooyong_locator_app (https://github.com/MusicOfScience/kooyong-address-locator)")
-    return geolocator.geocode(query, country_codes="au", addressdetails=True)
+# 🧠 Dynamically compute Kooyong bounding box from shapefile
+def get_kooyong_viewbox(gdf):
+    bounds = gdf.total_bounds  # [minx, miny, maxx, maxy]
+    sw = (bounds[0], bounds[1])  # (min_lon, min_lat)
+    ne = (bounds[2], bounds[3])  # (max_lon, max_lat)
+    return [sw, ne]
 
+# Load boundary once
 kooyong = load_kooyong_boundary()
 
+# Safe geocode with bounding box from AEC shapefile
+@lru_cache(maxsize=100)
+def safe_geocode(query, viewbox):
+    time.sleep(1)  # throttle
+    geolocator = Nominatim(user_agent="kooyong_locator_app (https://github.com/MusicOfScience/kooyong-address-locator)")
+    return geolocator.geocode(
+        query,
+        country_codes="au",
+        addressdetails=True,
+        viewbox=viewbox,
+        bounded=True
+    )
+
+# 🧭 Geocode and check
 if kooyong is not None and address_input.strip():
-    query = address_input
-    if "Victoria" not in query and "VIC" not in query:
-        query += ", Victoria, Australia"
+    viewbox = get_kooyong_viewbox(kooyong)
 
     try:
-        location = safe_geocode(query)
+        location = safe_geocode(address_input, tuple(viewbox))
     except GeocoderUnavailable:
-        st.error("⚠️ Geocoding service temporarily unavailable. This may be due to rate-limiting. Please wait a few seconds and try again.")
+        st.error("⚠️ Geocoding temporarily unavailable. Please wait and try again.")
         location = None
 
     if location and location.raw.get("address", {}).get("state") == "Victoria":
         point = Point(location.longitude, location.latitude)
         within = kooyong.geometry.iloc[0].intersects(point)
 
-        # 🧭 Display raw geocode info for debugging
+        # 📎 Debugging feedback
         st.write("📍 Geocoded to:", (location.latitude, location.longitude))
-        st.write("📎 Location:", location.raw.get("display_name"))
+        st.write("📎 Full address:", location.raw.get("display_name"))
+        st.write("🏘️ Suburb:", location.raw.get("address", {}).get("suburb", "Unknown"))
 
         if within:
             st.success("✅ This address is inside Kooyong.")
         else:
             st.warning("🚫 This address is outside Kooyong.")
 
-        # 🗺️ FOLIUM MAP
+        # 🗺️ Map output
         m = folium.Map(location=[location.latitude, location.longitude], zoom_start=14, tiles=style)
         folium.Marker(
             [location.latitude, location.longitude],
@@ -99,6 +110,4 @@ if kooyong is not None and address_input.strip():
         folium.GeoJson(kooyong.geometry.iloc[0], name="Kooyong Boundary").add_to(m)
         st_folium(m, width=1000, height=600)
     else:
-        st.warning("⚠️ Address not found in Victoria, Australia. Try adding suburb or postcode.")
-
-
+        st.warning("⚠️ Address not found in Victoria, Australia. Please check spelling or add suburb/postcode.")
