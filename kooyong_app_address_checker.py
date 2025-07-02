@@ -66,30 +66,58 @@ def geocode_address(address, street_df=None):
     try:
         geolocator = Nominatim(user_agent="kooyong_address_checker")
         best_result = None
+        results_tried = []
         
         # Parse street name to see if we can match it in our database first
         parsed_street = parse_street_name(address)
         matching_suburbs = []
+        matched_street_name = None
         
         if street_df is not None:
-            matches = street_df[street_df['street_lower'].str.contains(parsed_street, case=False, na=False)]
-            if not matches.empty:
-                matching_suburbs = matches['suburb'].unique().tolist()
+            # Look for exact matches first
+            exact_matches = street_df[street_df['street_lower'] == parsed_street.lower()]
+            if not exact_matches.empty:
+                matching_suburbs = exact_matches['suburb'].unique().tolist()
+                matched_street_name = exact_matches.iloc[0]['street_name']
+            else:
+                # Fall back to partial matches
+                matches = street_df[street_df['street_lower'].str.contains(parsed_street, case=False, na=False)]
+                if not matches.empty:
+                    matching_suburbs = matches['suburb'].unique().tolist()
+                    matched_street_name = matches.iloc[0]['street_name']
         
-        # Strategy 1: If we found matching suburbs in our database, try those first
-        if matching_suburbs:
-            st.info(f"🔍 Found '{parsed_street}' in suburbs: {', '.join(matching_suburbs)}")
+        # Strategy 1: If we found matching suburbs in our database, try those first with the exact street name
+        if matching_suburbs and matched_street_name:
+            st.info(f"🔍 Found '{matched_street_name}' in suburbs: {', '.join(matching_suburbs)}")
+            
+            # Extract house number from original address if present
+            house_number = ""
+            house_match = re.match(r'^(\d+[a-zA-Z]?)\s+', address.strip())
+            if house_match:
+                house_number = house_match.group(1) + " "
+            
             for suburb in matching_suburbs:
-                if suburb in kooyong_suburbs:  # Only try Kooyong suburbs
-                    enhanced_address = f"{address}, {suburb}, VIC, Australia"
+                if suburb in kooyong_suburbs or suburb.replace(' - East', '').replace(' - West', '') in kooyong_suburbs:
+                    # Try with the exact street name from our database
+                    enhanced_address = f"{house_number}{matched_street_name}, {suburb}, VIC, Australia"
                     location = geolocator.geocode(enhanced_address, timeout=10)
+                    results_tried.append(f"Tried: {enhanced_address}")
+                    
                     if location:
-                        return location.latitude, location.longitude, location.address, f"Matched via database suburb: {suburb}"
+                        # Verify the result makes sense
+                        if (matched_street_name.lower() in location.address.lower() or 
+                            suburb.lower() in location.address.lower()):
+                            return location.latitude, location.longitude, location.address, f"Matched via database: {suburb}"
+                        else:
+                            if best_result is None:
+                                best_result = (location.latitude, location.longitude, location.address, f"Database result (may be incorrect): {suburb}")
         
-        # Strategy 2: Try with each Kooyong suburb
+        # Strategy 2: Try with each Kooyong suburb using original address
         for suburb in kooyong_suburbs:
             enhanced_address = f"{address}, {suburb}, VIC, Australia"
             location = geolocator.geocode(enhanced_address, timeout=10)
+            results_tried.append(f"Tried: {enhanced_address}")
+            
             if location:
                 # Check if the returned address actually contains the Kooyong suburb
                 if any(ks.lower() in location.address.lower() for ks in kooyong_suburbs):
@@ -101,6 +129,7 @@ def geocode_address(address, street_df=None):
         
         # Strategy 3: Try with VIC, Australia (general Victoria search)
         location = geolocator.geocode(f"{address}, VIC, Australia", timeout=10)
+        results_tried.append(f"Tried: {address}, VIC, Australia")
         if location:
             # Check if it's in a Kooyong suburb
             if any(ks.lower() in location.address.lower() for ks in kooyong_suburbs):
@@ -111,6 +140,7 @@ def geocode_address(address, street_df=None):
         
         # Strategy 4: Try with Melbourne, VIC, Australia
         location = geolocator.geocode(f"{address}, Melbourne, VIC, Australia", timeout=10)
+        results_tried.append(f"Tried: {address}, Melbourne, VIC, Australia")
         if location:
             if any(ks.lower() in location.address.lower() for ks in kooyong_suburbs):
                 return location.latitude, location.longitude, location.address, "Matched via Melbourne search"
@@ -120,6 +150,7 @@ def geocode_address(address, street_df=None):
         
         # Strategy 5: Last resort - address as-is
         location = geolocator.geocode(address, timeout=10)
+        results_tried.append(f"Tried: {address}")
         if location:
             if any(ks.lower() in location.address.lower() for ks in kooyong_suburbs):
                 return location.latitude, location.longitude, location.address, "Matched via direct search"
@@ -129,6 +160,11 @@ def geocode_address(address, street_df=None):
         
         # Return best result if we have one, even if not ideal
         if best_result:
+            # Add debug info in expander
+            with st.expander("🔧 Debug Info"):
+                st.write("Search attempts made:")
+                for attempt in results_tried:
+                    st.write(f"• {attempt}")
             return best_result[0], best_result[1], best_result[2], f"{best_result[3]} (may not be in Kooyong)"
         
         return None, None, None, None
