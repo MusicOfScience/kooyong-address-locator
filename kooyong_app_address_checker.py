@@ -272,7 +272,6 @@ def main():
                     map_obj, 
                     width=400, 
                     height=400,
-                    returned_data=["last_object_clicked"],
                     key="kooyong_map"
                 )
 
