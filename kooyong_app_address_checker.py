@@ -186,13 +186,21 @@ def create_map(lat, lon, kooyong_gdf, address):
 
 # Main app logic
 def main():
+    # Initialize session state to preserve results
+    if 'results' not in st.session_state:
+        st.session_state.results = None
+    
     # Load data
     street_df = load_street_data()
     kooyong_gdf = load_electorate_data()
     
     # Address input
     st.markdown("**Enter an address (e.g., 145 Camberwell Road):**")
-    address_input = st.text_input("", placeholder="145 Camberwell Road")
+    address_input = st.text_input(
+        "Address", 
+        placeholder="145 Camberwell Road",
+        label_visibility="hidden"
+    )
     
     if st.button("🔍 Check Address") and address_input:
         with st.spinner("Geocoding address..."):
@@ -201,9 +209,8 @@ def main():
             
             if lat is None or lon is None:
                 st.error("❌ Could not geocode the address. Please check the address and try again.")
+                st.session_state.results = None
                 return
-            
-            st.success(f"📍 Geocoded to: {full_address}")
             
             # Step 2: Check if point is in Kooyong electorate
             in_kooyong = point_in_kooyong(lat, lon, kooyong_gdf)
@@ -212,32 +219,62 @@ def main():
             parsed_street = parse_street_name(address_input)
             street_match, matched_street_name = check_street_match(parsed_street, street_df)
             
-            # Display results
-            col1, col2 = st.columns([1, 1])
+            # Store results in session state
+            st.session_state.results = {
+                'address_input': address_input,
+                'lat': lat,
+                'lon': lon,
+                'full_address': full_address,
+                'in_kooyong': in_kooyong,
+                'street_match': street_match,
+                'matched_street_name': matched_street_name,
+                'kooyong_gdf': kooyong_gdf
+            }
+    
+    # Display results if they exist
+    if st.session_state.results:
+        results = st.session_state.results
+        
+        st.success(f"📍 Geocoded to: {results['full_address']}")
+        
+        # Display results
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.subheader("📊 Results")
             
-            with col1:
-                st.subheader("📊 Results")
-                
-                if in_kooyong:
-                    st.success("✅ This address is within the Kooyong electorate.")
-                else:
-                    st.error("❌ This address is NOT within the Kooyong electorate.")
-                
-                if street_match:
-                    st.info(f"📍 Street segment matched: {matched_street_name}")
-                else:
-                    st.warning("🔍 No street match found in the lookup database.")
-                
-                # Display coordinates
-                st.caption(f"Coordinates: {lat:.6f}, {lon:.6f}")
+            if results['in_kooyong']:
+                st.success("✅ This address is within the Kooyong electorate.")
+            else:
+                st.error("❌ This address is NOT within the Kooyong electorate.")
             
-            with col2:
-                st.subheader("🗺️ Map")
-                
-                # Create and display map
-                map_obj = create_map(lat, lon, kooyong_gdf, address_input)
-                if map_obj:
-                    st_folium(map_obj, width=400, height=400)
+            if results['street_match']:
+                st.info(f"📍 Street segment matched: {results['matched_street_name']}")
+            else:
+                st.warning("🔍 No street match found in the lookup database.")
+            
+            # Display coordinates
+            st.caption(f"Coordinates: {results['lat']:.6f}, {results['lon']:.6f}")
+        
+        with col2:
+            st.subheader("🗺️ Map")
+            
+            # Create and display map
+            map_obj = create_map(
+                results['lat'], 
+                results['lon'], 
+                results['kooyong_gdf'], 
+                results['address_input']
+            )
+            if map_obj:
+                # Use session state to prevent map from clearing results
+                st_folium(
+                    map_obj, 
+                    width=400, 
+                    height=400,
+                    returned_data=["last_object_clicked"],
+                    key="kooyong_map"
+                )
 
     # File status check
     with st.expander("📁 Data File Status"):
