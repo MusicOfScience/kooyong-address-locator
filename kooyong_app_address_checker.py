@@ -66,10 +66,10 @@ def geocode_address(address):
     try:
         geolocator = Nominatim(user_agent="kooyong_address_checker")
         
-        # Try geocoding the address as-is first
-        location = geolocator.geocode(address, timeout=10)
+        # First try: address + VIC, Australia (prioritize Victoria)
+        location = geolocator.geocode(f"{address}, VIC, Australia", timeout=10)
         
-        # If that fails, try adding likely Kooyong suburbs
+        # Second try: address + each Kooyong suburb + VIC
         if not location:
             for suburb in kooyong_suburbs:
                 enhanced_address = f"{address}, {suburb}, VIC, Australia"
@@ -77,10 +77,14 @@ def geocode_address(address):
                 if location:
                     break
         
-        # Final fallback to Melbourne
+        # Third try: address + Melbourne, VIC, Australia
         if not location:
             enhanced_address = f"{address}, Melbourne, VIC, Australia"
             location = geolocator.geocode(enhanced_address, timeout=10)
+        
+        # Last try: address as-is (original behavior)
+        if not location:
+            location = geolocator.geocode(address, timeout=10)
         
         if location:
             return location.latitude, location.longitude, location.address
@@ -111,16 +115,18 @@ def parse_street_name(address):
         return address.lower().strip()
 
 def check_street_match(parsed_street, street_df):
-    """Check if the parsed street matches any in the CSV"""
+    """Check if the parsed street matches any in the CSV and return all matches"""
     if street_df is None:
-        return False, None
+        return False, None, []
     
     try:
         # Direct match in street_lower column
         matches = street_df[street_df['street_lower'].str.contains(parsed_street, case=False, na=False)]
         
         if not matches.empty:
-            return True, matches.iloc[0]['street_name']
+            # Return all matching suburbs for this street
+            suburbs_list = matches[['street_name', 'suburb']].to_dict('records')
+            return True, matches.iloc[0]['street_name'], suburbs_list
         
         # Fuzzy match - check if parsed street is contained in any street name
         fuzzy_matches = street_df[street_df['street_lower'].str.contains(
@@ -129,12 +135,13 @@ def check_street_match(parsed_street, street_df):
         )]
         
         if not fuzzy_matches.empty:
-            return True, fuzzy_matches.iloc[0]['street_name']
+            suburbs_list = fuzzy_matches[['street_name', 'suburb']].to_dict('records')
+            return True, fuzzy_matches.iloc[0]['street_name'], suburbs_list
             
-        return False, None
+        return False, None, []
         
     except Exception:
-        return False, None
+        return False, None, []
 
 def point_in_kooyong(lat, lon, kooyong_gdf):
     """Check if a point falls within Kooyong electorate"""
@@ -217,7 +224,7 @@ def main():
             
             # Step 3: Check street match
             parsed_street = parse_street_name(address_input)
-            street_match, matched_street_name = check_street_match(parsed_street, street_df)
+            street_match, matched_street_name, matching_suburbs = check_street_match(parsed_street, street_df)
             
             # Store results in session state
             st.session_state.results = {
@@ -228,6 +235,7 @@ def main():
                 'in_kooyong': in_kooyong,
                 'street_match': street_match,
                 'matched_street_name': matched_street_name,
+                'matching_suburbs': matching_suburbs,
                 'kooyong_gdf': kooyong_gdf
             }
     
@@ -250,6 +258,15 @@ def main():
             
             if results['street_match']:
                 st.info(f"📍 Street segment matched: {results['matched_street_name']}")
+                
+                # Show all matching suburbs if multiple exist
+                if len(results['matching_suburbs']) > 1:
+                    st.warning("⚠️ Multiple suburbs found for this street:")
+                    for match in results['matching_suburbs']:
+                        st.write(f"   • {match['street_name']}, {match['suburb']}")
+                    st.info("💡 For more precise results, include the suburb in your search")
+                elif len(results['matching_suburbs']) == 1:
+                    st.caption(f"Found in suburb: {results['matching_suburbs'][0]['suburb']}")
             else:
                 st.warning("🔍 No street match found in the lookup database.")
             
