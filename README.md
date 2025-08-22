@@ -15,3 +15,13 @@ Install dependencies with:
 
 ```bash
 pip install -r requirements.txt
+```
+
+## 🏃 How to Run
+
+Start the Streamlit app with:
+
+```bash
+streamlit run kooyong_app_address_checker.py
+```
+
