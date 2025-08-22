@@ -4,6 +4,7 @@ import geopandas as gpd
 import folium
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
 from shapely.geometry import Point
 import re
 import os
@@ -53,6 +54,7 @@ def load_electorate_data():
         st.error(f"❌ Error loading electorate data: {str(e)}")
         return None
 
+@st.cache_data
 def geocode_address(address, street_df=None):
     """Geocode an address to get lat/lon coordinates with improved logic"""
     # 2024 Kooyong electorate suburbs (post-redistribution)
@@ -65,6 +67,7 @@ def geocode_address(address, street_df=None):
     
     try:
         geolocator = Nominatim(user_agent="kooyong_address_checker")
+        geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
         best_result = None
         results_tried = []
         
@@ -100,7 +103,7 @@ def geocode_address(address, street_df=None):
                 if suburb in kooyong_suburbs or suburb.replace(' - East', '').replace(' - West', '') in kooyong_suburbs:
                     # Try with the exact street name from our database
                     enhanced_address = f"{house_number}{matched_street_name}, {suburb}, VIC, Australia"
-                    location = geolocator.geocode(enhanced_address, timeout=10)
+                    location = geocode(enhanced_address, timeout=10)
                     results_tried.append(f"Tried: {enhanced_address}")
                     
                     if location:
@@ -115,7 +118,7 @@ def geocode_address(address, street_df=None):
         # Strategy 2: Try with each Kooyong suburb using original address
         for suburb in kooyong_suburbs:
             enhanced_address = f"{address}, {suburb}, VIC, Australia"
-            location = geolocator.geocode(enhanced_address, timeout=10)
+            location = geocode(enhanced_address, timeout=10)
             results_tried.append(f"Tried: {enhanced_address}")
             
             if location:
@@ -128,7 +131,7 @@ def geocode_address(address, street_df=None):
                         best_result = (location.latitude, location.longitude, location.address, f"Backup result from: {suburb}")
         
         # Strategy 3: Try with VIC, Australia (general Victoria search)
-        location = geolocator.geocode(f"{address}, VIC, Australia", timeout=10)
+        location = geocode(f"{address}, VIC, Australia", timeout=10)
         results_tried.append(f"Tried: {address}, VIC, Australia")
         if location:
             # Check if it's in a Kooyong suburb
@@ -139,7 +142,7 @@ def geocode_address(address, street_df=None):
                     best_result = (location.latitude, location.longitude, location.address, "VIC general search")
         
         # Strategy 4: Try with Melbourne, VIC, Australia
-        location = geolocator.geocode(f"{address}, Melbourne, VIC, Australia", timeout=10)
+        location = geocode(f"{address}, Melbourne, VIC, Australia", timeout=10)
         results_tried.append(f"Tried: {address}, Melbourne, VIC, Australia")
         if location:
             if any(ks.lower() in location.address.lower() for ks in kooyong_suburbs):
@@ -149,7 +152,7 @@ def geocode_address(address, street_df=None):
                     best_result = (location.latitude, location.longitude, location.address, "Melbourne general search")
         
         # Strategy 5: Last resort - address as-is
-        location = geolocator.geocode(address, timeout=10)
+        location = geocode(address, timeout=10)
         results_tried.append(f"Tried: {address}")
         if location:
             if any(ks.lower() in location.address.lower() for ks in kooyong_suburbs):
@@ -228,7 +231,8 @@ def point_in_kooyong(lat, lon, kooyong_gdf):
     
     try:
         point = Point(lon, lat)
-        return kooyong_gdf.geometry.contains(point).any()
+        # Treat boundary points as inside the electorate
+        return kooyong_gdf.geometry.covers(point).any()
     except Exception:
         return False
 
