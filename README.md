@@ -25,3 +25,9 @@ Start the Streamlit app with:
 streamlit run kooyong_app_address_checker.py
 ```
 
+## 📥 Hansard XML downloader
+
+The ParlInfo PDF helper now lives in the `hansard-xml-download/` folder so it
+can be dropped straight into a dedicated GitHub repo with the same name. See
+that folder’s README for details.
+
