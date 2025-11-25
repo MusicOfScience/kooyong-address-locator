@@ -25,3 +25,19 @@ Start the Streamlit app with:
 streamlit run kooyong_app_address_checker.py
 ```
 
+## 📥 Downloading ParlInfo PDFs from Colab
+
+If you want to download Hansard PDFs from a ParlInfo RSS export, use the helper
+script `parlinfo_pdf_scraper.py` (suitable for Google Colab):
+
+```bash
+python parlinfo_pdf_scraper.py \
+  --xml-feed /path/to/search_results.xml \
+  --output-dir parlinfo_pdfs \
+  --max-files 3
+```
+
+The script reads the RSS XML, visits each result page using browser-like
+headers, extracts the PDF link, and downloads the file with polite delays to
+mimic a human visitor.
+
