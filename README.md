@@ -15,3 +15,10 @@ Install dependencies with:
 
 ```bash
 pip install -r requirements.txt
+```
+
+## 🔗 Repository Connection
+
+This local repository is configured to connect to the GitHub repository:
+
+- `https://github.com/MusicOfScience/hubbub.git`
