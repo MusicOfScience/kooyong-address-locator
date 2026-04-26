@@ -1,0 +1,10 @@
+date,party,primary,sample_size,house_effect,mode
+2026-04-01,Independent,38,900,0.5,online
+2026-04-08,Independent,40,1200,0.2,phone
+2026-04-15,Independent,41,1100,0.2,online
+2026-04-01,Liberal,40,900,-0.3,online
+2026-04-08,Liberal,39,1200,0.0,phone
+2026-04-15,Liberal,38,1100,0.1,online
+2026-04-01,Greens,12,900,0.0,online
+2026-04-08,Greens,11,1200,0.0,phone
+2026-04-15,Greens,11,1100,0.0,online

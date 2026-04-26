@@ -1,0 +1,27 @@
+contest:
+  name: "Sample Seat: Kooyong-like Demo"
+  jurisdiction: "Federal"
+  election_date: "2026-05-01"
+  tcp_pair: ["Independent", "Liberal"]
+  count_status_thresholds:
+    early: 0.2
+    developing: 0.5
+    mature: 0.8
+    near_final: 0.95
+parties:
+  Labor: "#E1393E"
+  Coalition: "#2B6CB0"
+  Liberal: "#2B6CB0"
+  LNP: "#2B6CB0"
+  Greens: "#2F855A"
+  One Nation: "#DD6B20"
+  Teal: "#319795"
+  Independent: "#718096"
+vote_types:
+  - election_day_booth
+  - ordinary_pre_poll
+  - declaration_pre_poll
+  - postal
+  - absent
+  - provisional
+  - informal
