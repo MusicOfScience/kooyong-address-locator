@@ -1,0 +1,7 @@
+{
+  "name": "moe",
+  "private": true,
+  "scripts": {
+    "start": "streamlit run frontend/app.py"
+  }
+}
